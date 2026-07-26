@@ -1,0 +1,223 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-50 text-ink-900 font-sans antialiased;
+    font-feature-settings: 'ss01', 'ss02';
+    text-rendering: optimizeLegibility;
+  }
+
+  html.dark body {
+    @apply bg-ink-950 text-ink-100;
+  }
+
+  /* اعداد همیشه چپ‌چین و خوانا نمایش داده شوند */
+  .num {
+    direction: ltr;
+    unicode-bidi: embed;
+    font-variant-numeric: tabular-nums;
+    display: inline-block;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ink-300/60 rounded-full border-2 border-solid border-transparent bg-clip-padding;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-400/70;
+  }
+  html.dark ::-webkit-scrollbar-thumb {
+    @apply bg-ink-700/70;
+  }
+
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-500/60 ring-offset-1 ring-offset-white;
+  }
+  html.dark :focus-visible {
+    @apply ring-offset-ink-950;
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply min-h-full bg-ink-50 bg-mesh-light;
+  }
+  html.dark .app-shell {
+    @apply bg-ink-950 bg-mesh-dark;
+  }
+
+  .card {
+    @apply rounded-2xl border border-ink-200/70 bg-white shadow-card;
+  }
+  html.dark .card {
+    @apply border-ink-800/80 bg-ink-900/70 backdrop-blur;
+  }
+
+  .card-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-lg;
+  }
+
+  .glass {
+    @apply border border-white/40 bg-white/70 backdrop-blur-xl;
+  }
+  html.dark .glass {
+    @apply border-white/10 bg-ink-900/60;
+  }
+
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm
+      font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white shadow-sm hover:bg-brand-700 active:scale-[0.98];
+  }
+  .btn-secondary {
+    @apply btn border border-ink-200 bg-white text-ink-700 hover:bg-ink-50 active:scale-[0.98];
+  }
+  html.dark .btn-secondary {
+    @apply border-ink-700 bg-ink-800/60 text-ink-200 hover:bg-ink-800;
+  }
+  .btn-ghost {
+    @apply btn text-ink-600 hover:bg-ink-100;
+  }
+  html.dark .btn-ghost {
+    @apply text-ink-300 hover:bg-ink-800/70;
+  }
+  .btn-danger {
+    @apply btn bg-rose-600 text-white hover:bg-rose-500 active:scale-[0.98];
+  }
+  .btn-success {
+    @apply btn bg-teal-600 text-white hover:bg-teal-500 active:scale-[0.98];
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm text-ink-900
+      placeholder:text-ink-400 transition focus:border-brand-400 focus:ring-4 focus:ring-brand-500/10;
+  }
+  html.dark .input {
+    @apply border-ink-700 bg-ink-900/60 text-ink-100 placeholder:text-ink-500;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-ink-600;
+  }
+  html.dark .label {
+    @apply text-ink-400;
+  }
+
+  .table-wrap {
+    @apply w-full overflow-x-auto rounded-2xl border border-ink-200/70 bg-white shadow-card;
+  }
+  html.dark .table-wrap {
+    @apply border-ink-800 bg-ink-900/60;
+  }
+
+  .table {
+    @apply w-full text-right text-sm;
+  }
+  .table thead th {
+    @apply whitespace-nowrap border-b border-ink-200/80 bg-ink-50/80 px-4 py-3 text-xs
+      font-semibold text-ink-600;
+  }
+  html.dark .table thead th {
+    @apply border-ink-800 bg-ink-900/80 text-ink-400;
+  }
+  .table tbody td {
+    @apply border-b border-ink-100 px-4 py-3 align-middle text-ink-800;
+  }
+  html.dark .table tbody td {
+    @apply border-ink-800/70 text-ink-200;
+  }
+  .table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .table tbody tr {
+    @apply transition-colors hover:bg-brand-50/50;
+  }
+  html.dark .table tbody tr {
+    @apply hover:bg-ink-800/40;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-medium
+      whitespace-nowrap;
+  }
+
+  .skeleton {
+    @apply animate-shimmer rounded-lg bg-ink-200/70;
+    background-image: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.65) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    background-size: 200% 100%;
+  }
+  html.dark .skeleton {
+    @apply bg-ink-800;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-ink-600
+      transition-all duration-150 hover:bg-white hover:text-brand-700 hover:shadow-sm;
+  }
+  html.dark .sidebar-link {
+    @apply text-ink-400 hover:bg-ink-800/70 hover:text-brand-300;
+  }
+  .sidebar-link-active {
+    @apply bg-white text-brand-700 shadow-card;
+  }
+  html.dark .sidebar-link-active {
+    @apply bg-brand-500/15 text-brand-200;
+  }
+
+  .stat-value {
+    @apply num text-2xl font-bold tracking-tight;
+  }
+}
+
+/* نمودارهای Recharts در حالت RTL */
+.recharts-wrapper {
+  direction: ltr;
+}
+.recharts-default-tooltip {
+  direction: rtl !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(148, 163, 184, 0.25) !important;
+  box-shadow: 0 12px 30px -10px rgba(16, 24, 40, 0.25) !important;
+}
