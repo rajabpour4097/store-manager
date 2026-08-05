@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 from accounts.models import Role, User
 from catalog.models import Product, StockMovement
 from catalog.services import apply_movement
+from cheques.models import Cheque, ChequeDirection
 from ledger.models import EntryCategory, LedgerEntry
 from orders.models import Order, OrderItem, OrderType
 from orders.services import confirm_order
@@ -109,6 +110,37 @@ class PartyApiTests(TestCase):
         party = Party.objects.create(name='طرف')
         self.client.force_authenticate(self.accountant)
         self.assertEqual(self.client.delete(f'/api/parties/{party.id}/').status_code, 403)
+
+    def test_manager_can_delete_party_with_related_records(self):
+        party = Party.objects.create(name='طرف با سوابق')
+        product = Product.objects.create(name='کالا', purchase_price=100, sale_price=200)
+        apply_movement(product=product, date=date.today(), quantity=Decimal('100'),
+                       reason=StockMovement.Reason.INITIAL)
+
+        order = Order.objects.create(order_type=OrderType.SALE, party=party, order_date=date.today())
+        OrderItem.objects.create(order=order, product=product, quantity=Decimal('2'),
+                                 unit_price=200, unit_cost=100)
+        order.recalculate()
+        confirm_order(order, user=self.manager)
+
+        Cheque.objects.create(
+            direction=ChequeDirection.RECEIVABLE,
+            party=party,
+            serial_number='123456',
+            bank_name='melli',
+            amount=Decimal('500000'),
+            issue_date=date.today(),
+            due_date=date.today() + timedelta(days=30),
+        )
+        LedgerEntry.objects.create(party=party, date=date.today(), debit=Decimal('1000'))
+
+        self.client.force_authenticate(self.manager)
+        response = self.client.delete(f'/api/parties/{party.id}/')
+        self.assertEqual(response.status_code, 204, response.data)
+        self.assertFalse(Party.objects.filter(id=party.id).exists())
+        self.assertFalse(Order.objects.filter(party=party).exists())
+        self.assertFalse(Cheque.objects.filter(party=party).exists())
+        self.assertFalse(LedgerEntry.objects.filter(party=party).exists())
 
     def test_aging_report(self):
         customer = Party.objects.create(name='مشتری', party_type=PartyType.CUSTOMER)

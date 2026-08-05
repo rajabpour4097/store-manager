@@ -328,7 +328,7 @@ export function PartiesPage() {
         title="حذف طرف حساب"
         message={
           deleting
-            ? `«${deleting.name}» حذف شود؟ در صورت وجود سند، چک یا فاکتور مرتبط، حذف ممکن نیست.`
+            ? `«${deleting.name}» و تمام سفارش‌ها، چک‌ها و اسناد دفتر مرتبط با آن حذف شوند؟ این عملیات قابل بازگشت نیست.`
             : ''
         }
         confirmLabel="حذف کن"

@@ -13,6 +13,7 @@ from ledger.services import build_statement, party_totals
 
 from .models import Party, PartyType
 from .serializers import PartySerializer, PartyTypeChoiceSerializer
+from .services import PartyDeleteError, delete_party_cascade
 
 ZERO = Value(Decimal('0'), output_field=DecimalField(max_digits=18, decimal_places=0))
 
@@ -58,9 +59,25 @@ class PartyViewSet(viewsets.ModelViewSet):
                      f'ویرایش طرف حساب {party.name}', self.request)
 
     def perform_destroy(self, instance):
-        log_activity(self.request.user, ActivityLog.Action.DELETE, 'Party', instance.id,
-                     f'حذف طرف حساب {instance.name}', self.request)
-        instance.delete()
+        try:
+            result = delete_party_cascade(instance, user=self.request.user)
+        except PartyDeleteError as exc:
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError({'detail': str(exc)}) from exc
+
+        log_activity(
+            self.request.user,
+            ActivityLog.Action.DELETE,
+            'Party',
+            result['party_id'],
+            (
+                f'حذف طرف حساب {result["party_name"]} '
+                f'({result["deleted_orders"]} سفارش، {result["deleted_cheques"]} چک، '
+                f'{result["deleted_ledger_entries"]} سند دفتر)'
+            ),
+            self.request,
+        )
 
     @action(detail=False, methods=['get'])
     def types(self, request):
