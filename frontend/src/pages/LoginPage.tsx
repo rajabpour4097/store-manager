@@ -178,31 +178,6 @@ export function LoginPage() {
               ورود به سامانه
             </Button>
           </form>
-
-          <div className="mt-6 rounded-2xl border border-dashed border-ink-300 p-4 dark:border-ink-700">
-            <p className="mb-2.5 text-xs font-semibold text-ink-600 dark:text-ink-300">
-              حساب‌های آماده برای ورود سریع
-            </p>
-            <div className="space-y-1.5">
-              {DEMO_ACCOUNTS.map((account) => (
-                <button
-                  key={account.username}
-                  type="button"
-                  onClick={() => {
-                    setUsername(account.username)
-                    setPassword(account.password)
-                    setError(null)
-                  }}
-                  className="flex w-full items-center justify-between gap-3 rounded-xl bg-ink-50 px-3 py-2 text-right text-xs transition hover:bg-brand-50 dark:bg-ink-900 dark:hover:bg-brand-500/10"
-                >
-                  <span className="font-medium text-ink-700 dark:text-ink-200">{account.role}</span>
-                  <span className="num text-ink-500 dark:text-ink-400" dir="ltr">
-                    {account.username} / {account.password}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </section>
     </div>
