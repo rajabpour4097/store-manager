@@ -11,7 +11,7 @@ from django.db import transaction
 
 from catalog.models import Product, ProductCategory, Unit
 
-DEFAULT_CSV = Path('products.csv')
+DEFAULT_CSV = Path('/root/store-manager/backend/catalog/management/products.csv')
 
 
 class Command(BaseCommand):
