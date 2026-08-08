@@ -25,6 +25,9 @@ interface AsyncSelectProps {
   /** برچسب مقدار انتخاب‌شده وقتی گزینه‌ها بارگذاری نشده‌اند */
   selectedLabel?: string
   emptyText?: string
+  /** با کلیک، فرم ایجاد موجودیت جدید باز می‌شود */
+  onCreateNew?: () => void
+  createLabel?: string
 }
 
 /** انتخابگر جست‌وجویی برای موجودیت‌های سرور (طرف‌حساب، کالا …) */
@@ -41,6 +44,8 @@ export function AsyncSelect({
   disabled,
   selectedLabel,
   emptyText = 'موردی یافت نشد.',
+  onCreateNew,
+  createLabel = 'افزودن مورد جدید',
 }: AsyncSelectProps) {
   const [open, setOpen] = useState(false)
   const [term, setTerm] = useState('')
@@ -184,6 +189,22 @@ export function AsyncSelect({
                 </li>
               ))}
             </ul>
+            {onCreateNew && (
+              <div className="border-t border-ink-100 p-1 dark:border-ink-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    setTerm('')
+                    onCreateNew()
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-right text-sm font-medium text-brand-600 transition hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-500/10"
+                >
+                  <span className="text-lg leading-none">+</span>
+                  {createLabel}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

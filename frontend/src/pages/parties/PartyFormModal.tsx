@@ -27,10 +27,13 @@ interface FormState {
   notes: string
 }
 
-function initialState(party?: Party | null): FormState {
+function initialState(
+  party?: Party | null,
+  defaults?: { partyType?: string; name?: string },
+): FormState {
   return {
-    name: party?.name ?? '',
-    party_type: party?.party_type ?? 'customer',
+    name: party?.name ?? defaults?.name ?? '',
+    party_type: party?.party_type ?? defaults?.partyType ?? 'customer',
     is_legal_entity: party?.is_legal_entity ?? false,
     national_id: party?.national_id ?? '',
     economic_code: party?.economic_code ?? '',
@@ -51,22 +54,34 @@ interface PartyFormModalProps {
   open: boolean
   party?: Party | null
   types: Choice[]
+  defaultPartyType?: string
+  defaultName?: string
   onClose: () => void
-  onSaved: () => void
+  onSaved: (party: Party) => void
 }
 
-export function PartyFormModal({ open, party, types, onClose, onSaved }: PartyFormModalProps) {
+export function PartyFormModal({
+  open,
+  party,
+  types,
+  defaultPartyType,
+  defaultName,
+  onClose,
+  onSaved,
+}: PartyFormModalProps) {
   const toast = useToast()
-  const [form, setForm] = useState<FormState>(() => initialState(party))
+  const [form, setForm] = useState<FormState>(() =>
+    initialState(party, { partyType: defaultPartyType, name: defaultName }),
+  )
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open) {
-      setForm(initialState(party))
+      setForm(initialState(party, { partyType: defaultPartyType, name: defaultName }))
       setErrors({})
     }
-  }, [open, party])
+  }, [open, party, defaultPartyType, defaultName])
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -87,14 +102,15 @@ export function PartyFormModal({ open, party, types, onClose, onSaved }: PartyFo
 
     setSaving(true)
     try {
+      let saved: Party
       if (party) {
-        await partiesApi.update(party.id, payload)
+        saved = await partiesApi.update(party.id, payload)
         toast.success('طرف حساب ویرایش شد.')
       } else {
-        await partiesApi.create(payload)
+        saved = await partiesApi.create(payload)
         toast.success('طرف حساب جدید ثبت شد.')
       }
-      onSaved()
+      onSaved(saved)
       onClose()
     } catch (error) {
       if (error instanceof ApiError) {

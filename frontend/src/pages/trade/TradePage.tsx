@@ -21,15 +21,17 @@ import { SelectInput, Switch } from '@/components/ui/Field'
 import { ConfirmDialog } from '@/components/ui/Modal'
 import { Money, PageHeader, StatCard, Tabs } from '@/components/ui/Misc'
 import { AsyncSelect } from '@/components/ui/AsyncSelect'
-import { searchPartiesForOrder } from '@/components/ui/selectors'
+import { searchPartiesForOrder, searchProducts } from '@/components/ui/selectors'
 import { OrderFormModal } from '@/pages/orders/OrderFormModal'
+import { ProductFormModal } from '@/pages/catalog/ProductFormModal'
+import { PartyFormModal } from '@/pages/parties/PartyFormModal'
 import { useAsync } from '@/hooks/useAsync'
 import { useDebounce } from '@/hooks/useDebounce'
 import { usePaginatedList } from '@/hooks/usePaginatedList'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { ApiError } from '@/services/api'
-import { ordersApi } from '@/services/endpoints'
+import { ordersApi, partiesApi, catalogApi } from '@/services/endpoints'
 import { formatCompactMoney, formatQuantity, toPersianDigits } from '@/utils/format'
 import type { InvoiceUploadPreview, Order, OrderListItem, OrderType, ParsedInvoice } from '@/types'
 
@@ -69,6 +71,16 @@ export function TradePage() {
   const [savingAuto, setSavingAuto] = useState(false)
   const [createMissingProducts, setCreateMissingProducts] = useState(true)
   const [editItems, setEditItems] = useState<EditableItem[]>([])
+  const [partyFormOpen, setPartyFormOpen] = useState(false)
+  const [productFormOpen, setProductFormOpen] = useState(false)
+  const [productFormLineKey, setProductFormLineKey] = useState<string | null>(null)
+
+  const { data: partyTypes } = useAsync(() => partiesApi.types(), [])
+  const { data: catalogOptions } = useAsync(() => catalogApi.options(), [])
+  const { data: categories } = useAsync(
+    () => catalogApi.categories({ page_size: 200 }),
+    [],
+  )
 
   const partySearch = useCallback(
     (term: string) => searchPartiesForOrder(term, autoOrderType),
@@ -80,6 +92,53 @@ export function TradePage() {
     setAutoParty(null)
     setAutoPartyLabel('')
   }
+
+  const defaultPartyType = autoOrderType === 'purchase' ? 'supplier' : 'customer'
+
+  const linkProductToRow = (key: string, productId: number, name: string, unitPrice: string) => {
+    setEditItems((current) =>
+      current.map((row) =>
+        row.key === key
+          ? { ...row, product_id: productId, product_name: name, unit_price: unitPrice || row.unit_price }
+          : row,
+      ),
+    )
+  }
+
+  const handleProductSelect = async (key: string, productId: number | null) => {
+    if (!productId) {
+      setEditItems((current) =>
+        current.map((row) =>
+          row.key === key ? { ...row, product_id: null } : row,
+        ),
+      )
+      return
+    }
+    try {
+      const product = await catalogApi.product(productId)
+      linkProductToRow(
+        key,
+        product.id,
+        product.name,
+        String(
+          autoOrderType === 'sale'
+            ? Number(product.sale_price) || ''
+            : Number(product.purchase_price) || '',
+        ),
+      )
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const openProductForm = (lineKey: string) => {
+    setProductFormLineKey(lineKey)
+    setProductFormOpen(true)
+  }
+
+  const productFormLine = productFormLineKey
+    ? editItems.find((item) => item.key === productFormLineKey)
+    : null
 
   const { data: options } = useAsync(() => ordersApi.options(), [])
   const { data: summary, reload: reloadSummary } = useAsync(() => ordersApi.summary(), [])
@@ -435,6 +494,12 @@ export function TradePage() {
                         ? 'جست‌وجوی تأمین‌کننده…'
                         : 'جست‌وجوی مشتری…'
                     }
+                    onCreateNew={can('parties.add') ? () => setPartyFormOpen(true) : undefined}
+                    createLabel={
+                      autoOrderType === 'purchase'
+                        ? 'ثبت تأمین‌کننده جدید'
+                        : 'ثبت مشتری جدید'
+                    }
                   />
                 </div>
               </div>
@@ -489,7 +554,16 @@ export function TradePage() {
               <div className="mb-3 grid gap-2 text-sm sm:grid-cols-3">
                 <div>
                   <span className="text-ink-400">طرف حساب: </span>
-                  {preview.party_name || '—'}
+                  <span>{autoPartyLabel || preview.party_name || '—'}</span>
+                  {!autoParty && preview.party_name && can('parties.add') && (
+                    <button
+                      type="button"
+                      className="mt-1 block text-xs text-brand-600 hover:underline dark:text-brand-300"
+                      onClick={() => setPartyFormOpen(true)}
+                    >
+                      + ثبت «{preview.party_name}» به‌عنوان طرف حساب
+                    </button>
+                  )}
                 </div>
                 <div>
                   <span className="text-ink-400">تاریخ: </span>
@@ -548,20 +622,33 @@ export function TradePage() {
                     {editItems.map((item) => (
                       <tr key={item.key} className="border-b border-ink-100 dark:border-ink-800">
                         <td className="py-2 pe-2">
-                          <input
-                            className="input w-full min-w-[180px] text-sm"
-                            value={item.product_name}
-                            placeholder="نام کالا…"
-                            onChange={(e) =>
-                              setEditItems((current) =>
-                                current.map((row) =>
-                                  row.key === item.key
-                                    ? { ...row, product_name: e.target.value, product_id: null }
-                                    : row,
-                                ),
-                              )
-                            }
-                          />
+                          <div className="space-y-1.5">
+                            <input
+                              className="input w-full min-w-[180px] text-sm"
+                              value={item.product_name}
+                              placeholder="نام کالا…"
+                              onChange={(e) =>
+                                setEditItems((current) =>
+                                  current.map((row) =>
+                                    row.key === item.key
+                                      ? { ...row, product_name: e.target.value, product_id: null }
+                                      : row,
+                                  ),
+                                )
+                              }
+                            />
+                            <AsyncSelect
+                              value={item.product_id}
+                              selectedLabel={item.product_id ? item.product_name : ''}
+                              onChange={(value) => void handleProductSelect(item.key, value)}
+                              search={searchProducts}
+                              placeholder="انتخاب از انبار…"
+                              onCreateNew={
+                                can('catalog.add') ? () => openProductForm(item.key) : undefined
+                              }
+                              createLabel="ثبت کالای جدید"
+                            />
+                          </div>
                         </td>
                         <td className="py-2 pe-2">
                           <input
@@ -706,6 +793,50 @@ export function TradePage() {
         loading={savingAuto}
         onConfirm={() => void saveAutomatic()}
         onCancel={() => setConfirmOpen(false)}
+      />
+
+      <PartyFormModal
+        open={partyFormOpen}
+        types={partyTypes ?? []}
+        defaultPartyType={defaultPartyType}
+        defaultName={!autoParty ? preview?.party_name : undefined}
+        onClose={() => setPartyFormOpen(false)}
+        onSaved={(created) => {
+          setAutoParty(created.id)
+          setAutoPartyLabel(created.name)
+        }}
+      />
+
+      <ProductFormModal
+        open={productFormOpen}
+        product={null}
+        units={catalogOptions?.units ?? []}
+        categories={categories?.results ?? []}
+        defaultName={productFormLine?.product_name}
+        defaultSalePrice={
+          autoOrderType === 'sale' ? productFormLine?.unit_price : undefined
+        }
+        defaultPurchasePrice={
+          autoOrderType === 'purchase' ? productFormLine?.unit_price : undefined
+        }
+        onClose={() => {
+          setProductFormOpen(false)
+          setProductFormLineKey(null)
+        }}
+        onSaved={(created) => {
+          if (productFormLineKey) {
+            linkProductToRow(
+              productFormLineKey,
+              created.id,
+              created.name,
+              String(
+                autoOrderType === 'sale'
+                  ? Number(created.sale_price) || ''
+                  : Number(created.purchase_price) || '',
+              ),
+            )
+          }
+        }}
       />
     </>
   )

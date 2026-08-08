@@ -7,9 +7,13 @@ import { DatePicker } from '@/components/ui/DatePicker'
 import { NumberInput, SelectInput, TextArea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 import { searchPartiesForOrder, searchProducts } from '@/components/ui/selectors'
+import { ProductFormModal } from '@/pages/catalog/ProductFormModal'
+import { PartyFormModal } from '@/pages/parties/PartyFormModal'
+import { useAsync } from '@/hooks/useAsync'
+import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { ApiError } from '@/services/api'
-import { catalogApi, ordersApi } from '@/services/endpoints'
+import { catalogApi, ordersApi, partiesApi } from '@/services/endpoints'
 import { formatMoney, toNumber } from '@/utils/format'
 import { todayIso } from '@/utils/jalali'
 import type { OrderType } from '@/types'
@@ -48,6 +52,7 @@ export function OrderFormModal({
   onSaved,
 }: OrderFormModalProps) {
   const toast = useToast()
+  const { can } = useAuth()
   const [orderType, setOrderType] = useState<OrderType>(defaultType)
   const [party, setParty] = useState<number | null>(null)
   const [partyLabel, setPartyLabel] = useState('')
@@ -60,6 +65,16 @@ export function OrderFormModal({
   const [items, setItems] = useState<LineItem[]>([emptyLine()])
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [saving, setSaving] = useState(false)
+  const [partyFormOpen, setPartyFormOpen] = useState(false)
+  const [productFormOpen, setProductFormOpen] = useState(false)
+  const [productFormLineKey, setProductFormLineKey] = useState<string | null>(null)
+
+  const { data: partyTypes } = useAsync(() => partiesApi.types(), [])
+  const { data: catalogOptions } = useAsync(() => catalogApi.options(), [])
+  const { data: categories } = useAsync(
+    () => catalogApi.categories({ page_size: 200 }),
+    [],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -74,6 +89,9 @@ export function OrderFormModal({
     setDescription('')
     setItems([emptyLine()])
     setErrors({})
+    setPartyFormOpen(false)
+    setProductFormOpen(false)
+    setProductFormLineKey(null)
   }, [open, defaultType])
 
   const partySearch = useCallback(
@@ -117,6 +135,17 @@ export function OrderFormModal({
       /* ignore */
     }
   }
+
+  const openProductForm = (lineKey: string) => {
+    setProductFormLineKey(lineKey)
+    setProductFormOpen(true)
+  }
+
+  const productFormDefaults = productFormLineKey
+    ? items.find((item) => item.key === productFormLineKey)
+    : null
+
+  const defaultPartyType = orderType === 'purchase' ? 'supplier' : 'customer'
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -203,6 +232,10 @@ export function OrderFormModal({
             search={partySearch}
             placeholder={orderType === 'purchase' ? 'جست‌وجوی تأمین‌کننده…' : 'جست‌وجوی مشتری…'}
             error={errors.party}
+            onCreateNew={can('parties.add') ? () => setPartyFormOpen(true) : undefined}
+            createLabel={
+              orderType === 'purchase' ? 'ثبت تأمین‌کننده جدید' : 'ثبت مشتری جدید'
+            }
           />
           <DatePicker
             label="تاریخ سفارش"
@@ -241,6 +274,10 @@ export function OrderFormModal({
                     void handleProductPick(item.key, value, option?.label ?? '')
                   }
                   search={searchProducts}
+                  onCreateNew={
+                    can('catalog.add') ? () => openProductForm(item.key) : undefined
+                  }
+                  createLabel="ثبت کالای جدید"
                 />
                 <NumberInput
                   label={index === 0 ? 'تعداد' : undefined}
@@ -295,6 +332,40 @@ export function OrderFormModal({
           placeholder="یادداشت اختیاری…"
         />
       </form>
+
+      <PartyFormModal
+        open={partyFormOpen}
+        types={partyTypes ?? []}
+        defaultPartyType={defaultPartyType}
+        onClose={() => setPartyFormOpen(false)}
+        onSaved={(created) => {
+          setParty(created.id)
+          setPartyLabel(created.name)
+        }}
+      />
+
+      <ProductFormModal
+        open={productFormOpen}
+        product={null}
+        units={catalogOptions?.units ?? []}
+        categories={categories?.results ?? []}
+        defaultName={productFormDefaults?.productLabel}
+        defaultSalePrice={
+          orderType === 'sale' ? productFormDefaults?.unit_price : undefined
+        }
+        defaultPurchasePrice={
+          orderType === 'purchase' ? productFormDefaults?.unit_price : undefined
+        }
+        onClose={() => {
+          setProductFormOpen(false)
+          setProductFormLineKey(null)
+        }}
+        onSaved={(created) => {
+          if (productFormLineKey) {
+            void handleProductPick(productFormLineKey, created.id, created.name)
+          }
+        }}
+      />
     </Modal>
   )
 }

@@ -16,8 +16,11 @@ interface ProductFormModalProps {
   product: Product | null
   units: Choice[]
   categories: ProductCategory[]
+  defaultName?: string
+  defaultPurchasePrice?: string
+  defaultSalePrice?: string
   onClose: () => void
-  onSaved: () => void
+  onSaved: (product: Product) => void
 }
 
 export function ProductFormModal({
@@ -25,6 +28,9 @@ export function ProductFormModal({
   product,
   units,
   categories,
+  defaultName,
+  defaultPurchasePrice,
+  defaultSalePrice,
   onClose,
   onSaved,
 }: ProductFormModalProps) {
@@ -49,12 +55,14 @@ export function ProductFormModal({
   useEffect(() => {
     if (!open) return
     setForm({
-      name: product?.name ?? '',
+      name: product?.name ?? defaultName ?? '',
       barcode: product?.barcode ?? '',
       category: product?.category ? String(product.category) : '',
       unit: product?.unit ?? units[0]?.value ?? 'count',
-      purchase_price: product ? String(toNumber(product.purchase_price)) : '',
-      sale_price: product ? String(toNumber(product.sale_price)) : '',
+      purchase_price: product
+        ? String(toNumber(product.purchase_price))
+        : (defaultPurchasePrice ?? ''),
+      sale_price: product ? String(toNumber(product.sale_price)) : (defaultSalePrice ?? ''),
       reorder_point: product ? String(toNumber(product.reorder_point)) : '0',
       lead_time_days: product ? String(product.lead_time_days) : '7',
       description: product?.description ?? '',
@@ -64,7 +72,7 @@ export function ProductFormModal({
     setSupplierLabel(product?.supplier_name ?? '')
     setErrors({})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, product])
+  }, [open, product, defaultName, defaultPurchasePrice, defaultSalePrice])
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -101,14 +109,15 @@ export function ProductFormModal({
 
     setSaving(true)
     try {
+      let saved: Product
       if (product) {
-        await catalogApi.updateProduct(product.id, payload)
+        saved = await catalogApi.updateProduct(product.id, payload)
         toast.success('کالا ویرایش شد.')
       } else {
-        await catalogApi.createProduct(payload)
+        saved = await catalogApi.createProduct(payload)
         toast.success('کالای جدید ثبت شد.')
       }
-      onSaved()
+      onSaved(saved)
       onClose()
     } catch (error) {
       if (error instanceof ApiError) {
