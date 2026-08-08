@@ -52,12 +52,32 @@ class ChequeModelTests(TestCase):
         self.assertEqual(entry.debit, 0)
         self.assertEqual(self.customer.balance, -cheque.amount)
 
-    def test_payable_cheque_debits_the_supplier(self):
+    def test_payable_cheque_without_prior_debt_credits_the_supplier(self):
         cheque = self.make_cheque(direction=ChequeDirection.PAYABLE, serial_number='7001')
         entry = LedgerEntry.objects.get(source_type=SourceType.CHEQUE, source_id=cheque.id,
                                         category=EntryCategory.CHEQUE_ISSUED)
+        self.assertEqual(entry.credit, cheque.amount)
+        self.assertEqual(entry.debit, 0)
+        self.assertEqual(self.supplier.balance, -cheque.amount)
+
+    def test_payable_cheque_with_prior_debt_debits_the_supplier(self):
+        LedgerEntry.objects.create(
+            party=self.supplier,
+            date=self.today,
+            debit=0,
+            credit=Decimal('15000000'),
+            category=EntryCategory.PURCHASE_INVOICE,
+        )
+        cheque = self.make_cheque(
+            direction=ChequeDirection.PAYABLE,
+            serial_number='7002',
+            amount=Decimal('10000000'),
+        )
+        entry = LedgerEntry.objects.get(source_type=SourceType.CHEQUE, source_id=cheque.id,
+                                        category=EntryCategory.CHEQUE_ISSUED)
         self.assertEqual(entry.debit, cheque.amount)
-        self.assertEqual(self.supplier.balance, cheque.amount)
+        self.assertEqual(entry.credit, 0)
+        self.assertEqual(self.supplier.balance, Decimal('-5000000'))
 
     def test_bounced_cheque_reverses_the_original_entry(self):
         cheque = self.make_cheque()

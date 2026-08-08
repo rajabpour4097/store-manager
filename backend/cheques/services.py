@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Sum
 
 from ledger.models import EntryCategory, SourceType
 from ledger.services import delete_system_entries, sync_system_entry
@@ -67,11 +69,33 @@ ISSUE_MARKER = 'CHQ-ISSUE'
 SETTLE_MARKER = 'CHQ-SETTLE'
 
 
+def _party_balance_excluding_cheque(party, cheque_id: int) -> Decimal:
+    """مانده طرف حساب بدون در نظر گرفتن اسناد همین چک."""
+    totals = party.ledger_entries.exclude(
+        source_type=SourceType.CHEQUE, source_id=cheque_id,
+    ).aggregate(debit=Sum('debit'), credit=Sum('credit'))
+    debit = totals['debit'] or Decimal('0')
+    credit = totals['credit'] or Decimal('0')
+    return Decimal(party.opening_balance) + debit - credit
+
+
+def _cheque_issue_amounts(cheque: Cheque) -> tuple[Decimal, Decimal]:
+    """بدهکار/بستانکار سند صدور چک را برمی‌گرداند."""
+    if cheque.direction == ChequeDirection.RECEIVABLE:
+        return Decimal('0'), cheque.amount
+
+    # چک پرداختی: اگر از قبل به طرف حساب بدهکار بودیم، چک تسویه بدهی است (بدهکار).
+    # در غیر این صورت صدور چک یک تعهد/بدهی جدید ایجاد می‌کند (بستانکار).
+    if _party_balance_excluding_cheque(cheque.party, cheque.id) < 0:
+        return cheque.amount, Decimal('0')
+    return Decimal('0'), cheque.amount
+
+
 def sync_cheque_ledger(cheque: Cheque, user=None) -> None:
     """اسناد دفتر معین متناظر با یک چک را همگام می‌کند.
 
     چک دریافتی: هنگام دریافت، بدهی مشتری کم می‌شود (بستانکار).
-    چک پرداختی: هنگام صدور، بدهی ما به تأمین‌کننده کم می‌شود (بدهکار).
+    چک پرداختی: اگر بدهی قبلی داریم تسویه می‌شود (بدهکار)، وگرنه بدهی جدید ثبت می‌شود (بستانکار).
     چک برگشتی: اثر اولیه با یک سند معکوس خنثی می‌شود.
     """
     if not cheque.create_ledger_entry:
@@ -83,13 +107,14 @@ def sync_cheque_ledger(cheque: Cheque, user=None) -> None:
         return
 
     is_receivable = cheque.direction == ChequeDirection.RECEIVABLE
+    issue_debit, issue_credit = _cheque_issue_amounts(cheque)
 
     # سند اصلی: ثبت دریافت/صدور چک
     sync_system_entry(
         party=cheque.party,
         date=cheque.issue_date,
-        debit=0 if is_receivable else cheque.amount,
-        credit=cheque.amount if is_receivable else 0,
+        debit=issue_debit,
+        credit=issue_credit,
         category=EntryCategory.CHEQUE_RECEIVED if is_receivable else EntryCategory.CHEQUE_ISSUED,
         source_type=SourceType.CHEQUE,
         source_id=cheque.id,
@@ -108,8 +133,8 @@ def sync_cheque_ledger(cheque: Cheque, user=None) -> None:
         sync_system_entry(
             party=cheque.party,
             date=cheque.settled_date or cheque.due_date,
-            debit=cheque.amount if is_receivable else 0,
-            credit=0 if is_receivable else cheque.amount,
+            debit=issue_credit,
+            credit=issue_debit,
             category=EntryCategory.CHEQUE_BOUNCED,
             source_type=SourceType.CHEQUE,
             source_id=cheque.id,
