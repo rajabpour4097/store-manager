@@ -72,6 +72,19 @@ class PartyApiTests(TestCase):
         self.assertEqual(self.client.get('/api/parties/?balance_state=debtor').data['count'], 1)
         self.assertEqual(self.client.get('/api/parties/?balance_state=creditor').data['count'], 1)
 
+    def test_order_context_filter(self):
+        Party.objects.create(name='مشتری الف', party_type=PartyType.CUSTOMER)
+        Party.objects.create(name='تأمین‌کننده الف', party_type=PartyType.SUPPLIER)
+        Party.objects.create(name='هر دو', party_type=PartyType.BOTH)
+        Party.objects.create(name='سایر', party_type=PartyType.OTHER)
+
+        self.client.force_authenticate(self.manager)
+        sale_ids = {row['name'] for row in self.client.get('/api/parties/?order_context=sale').data['results']}
+        purchase_ids = {row['name'] for row in self.client.get('/api/parties/?order_context=purchase').data['results']}
+
+        self.assertEqual(sale_ids, {'مشتری الف', 'هر دو'})
+        self.assertEqual(purchase_ids, {'تأمین‌کننده الف', 'هر دو'})
+
     def test_summary_totals(self):
         debtor = Party.objects.create(name='بدهکار')
         creditor = Party.objects.create(name='بستانکار')

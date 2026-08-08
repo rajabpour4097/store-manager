@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowDownToLine,
@@ -21,7 +21,7 @@ import { SelectInput } from '@/components/ui/Field'
 import { ConfirmDialog } from '@/components/ui/Modal'
 import { Money, PageHeader, StatCard, Tabs } from '@/components/ui/Misc'
 import { AsyncSelect } from '@/components/ui/AsyncSelect'
-import { searchParties } from '@/components/ui/selectors'
+import { searchPartiesForOrder } from '@/components/ui/selectors'
 import { OrderFormModal } from '@/pages/orders/OrderFormModal'
 import { useAsync } from '@/hooks/useAsync'
 import { useDebounce } from '@/hooks/useDebounce'
@@ -59,6 +59,17 @@ export function TradePage() {
   const [previewFile, setPreviewFile] = useState<File | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [savingAuto, setSavingAuto] = useState(false)
+
+  const partySearch = useCallback(
+    (term: string) => searchPartiesForOrder(term, autoOrderType),
+    [autoOrderType],
+  )
+
+  const handleAutoOrderTypeChange = (value: OrderType) => {
+    setAutoOrderType(value)
+    setAutoParty(null)
+    setAutoPartyLabel('')
+  }
 
   const { data: options } = useAsync(() => ordersApi.options(), [])
   const { data: summary, reload: reloadSummary } = useAsync(() => ordersApi.summary(), [])
@@ -336,11 +347,13 @@ export function TradePage() {
                 <SelectInput
                   label="نوع عملیات"
                   value={autoOrderType}
-                  onChange={(v) => setAutoOrderType(v as OrderType)}
+                  onChange={(v) => handleAutoOrderTypeChange(v as OrderType)}
                   options={options?.order_types ?? []}
                 />
                 <div>
-                  <label className="label">طرف حساب (اختیاری)</label>
+                  <label className="label">
+                    {autoOrderType === 'purchase' ? 'تأمین‌کننده (اختیاری)' : 'مشتری (اختیاری)'}
+                  </label>
                   <AsyncSelect
                     value={autoParty}
                     selectedLabel={autoPartyLabel}
@@ -348,8 +361,12 @@ export function TradePage() {
                       setAutoParty(id)
                       setAutoPartyLabel(option?.label ?? '')
                     }}
-                    search={searchParties}
-                    placeholder="انتخاب مشتری یا تأمین‌کننده…"
+                    search={partySearch}
+                    placeholder={
+                      autoOrderType === 'purchase'
+                        ? 'جست‌وجوی تأمین‌کننده…'
+                        : 'جست‌وجوی مشتری…'
+                    }
                   />
                 </div>
               </div>

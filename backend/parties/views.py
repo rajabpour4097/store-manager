@@ -39,7 +39,19 @@ class PartyViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = annotate_balance(Party.objects.all())
-        state = self.request.query_params.get('balance_state')
+        params = self.request.query_params
+
+        order_context = params.get('order_context')
+        if order_context == 'sale':
+            queryset = queryset.filter(
+                party_type__in=[PartyType.CUSTOMER, PartyType.BOTH],
+            )
+        elif order_context == 'purchase':
+            queryset = queryset.filter(
+                party_type__in=[PartyType.SUPPLIER, PartyType.BOTH],
+            )
+
+        state = params.get('balance_state')
         if state == 'debtor':
             queryset = queryset.filter(cached_balance__gt=0)
         elif state == 'creditor':

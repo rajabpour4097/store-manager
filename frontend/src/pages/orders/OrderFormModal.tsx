@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 
 import { AsyncSelect } from '@/components/ui/AsyncSelect'
@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { DatePicker } from '@/components/ui/DatePicker'
 import { NumberInput, SelectInput, TextArea } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
-import { searchParties, searchProducts } from '@/components/ui/selectors'
+import { searchPartiesForOrder, searchProducts } from '@/components/ui/selectors'
 import { useToast } from '@/contexts/ToastContext'
 import { ApiError } from '@/services/api'
 import { catalogApi, ordersApi } from '@/services/endpoints'
@@ -75,6 +75,17 @@ export function OrderFormModal({
     setItems([emptyLine()])
     setErrors({})
   }, [open, defaultType])
+
+  const partySearch = useCallback(
+    (term: string) => searchPartiesForOrder(term, orderType),
+    [orderType],
+  )
+
+  const handleOrderTypeChange = (value: OrderType) => {
+    setOrderType(value)
+    setParty(null)
+    setPartyLabel('')
+  }
 
   const subtotal = items.reduce((sum, item) => {
     if (!item.product) return sum
@@ -174,14 +185,14 @@ export function OrderFormModal({
             label="نوع سفارش"
             required
             value={orderType}
-            onChange={(value) => setOrderType(value as OrderType)}
+            onChange={(value) => handleOrderTypeChange(value as OrderType)}
             options={[
               { value: 'sale', label: 'فروش' },
               { value: 'purchase', label: 'خرید' },
             ]}
           />
           <AsyncSelect
-            label="طرف حساب"
+            label={orderType === 'purchase' ? 'تأمین‌کننده' : 'مشتری'}
             required
             value={party}
             selectedLabel={partyLabel}
@@ -189,7 +200,8 @@ export function OrderFormModal({
               setParty(value)
               setPartyLabel(option?.label ?? '')
             }}
-            search={searchParties}
+            search={partySearch}
+            placeholder={orderType === 'purchase' ? 'جست‌وجوی تأمین‌کننده…' : 'جست‌وجوی مشتری…'}
             error={errors.party}
           />
           <DatePicker
