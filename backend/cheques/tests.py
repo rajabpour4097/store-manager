@@ -79,6 +79,28 @@ class ChequeModelTests(TestCase):
         self.assertEqual(entry.credit, 0)
         self.assertEqual(self.supplier.balance, Decimal('-5000000'))
 
+    def test_multiple_payable_cheques_accumulate_as_debt(self):
+        first = self.make_cheque(
+            direction=ChequeDirection.PAYABLE,
+            serial_number='7003',
+            amount=Decimal('5000000'),
+        )
+        second = self.make_cheque(
+            direction=ChequeDirection.PAYABLE,
+            serial_number='7004',
+            amount=Decimal('3000000'),
+        )
+        self.assertEqual(first.amount + second.amount, Decimal('8000000'))
+        self.assertEqual(self.supplier.balance, -Decimal('8000000'))
+        for cheque in (first, second):
+            entry = LedgerEntry.objects.get(
+                source_type=SourceType.CHEQUE,
+                source_id=cheque.id,
+                category=EntryCategory.CHEQUE_ISSUED,
+            )
+            self.assertEqual(entry.credit, cheque.amount)
+            self.assertEqual(entry.debit, 0)
+
     def test_bounced_cheque_reverses_the_original_entry(self):
         cheque = self.make_cheque()
         change_status(cheque, ChequeStatus.BOUNCED, user=self.user)

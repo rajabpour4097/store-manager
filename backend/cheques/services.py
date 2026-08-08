@@ -69,10 +69,10 @@ ISSUE_MARKER = 'CHQ-ISSUE'
 SETTLE_MARKER = 'CHQ-SETTLE'
 
 
-def _party_balance_excluding_cheque(party, cheque_id: int) -> Decimal:
-    """مانده طرف حساب بدون در نظر گرفتن اسناد همین چک."""
+def _party_non_cheque_balance(party) -> Decimal:
+    """مانده طرف حساب بدون اسناد چک (فقط فاکتور، پرداخت نقدی و …)."""
     totals = party.ledger_entries.exclude(
-        source_type=SourceType.CHEQUE, source_id=cheque_id,
+        source_type=SourceType.CHEQUE,
     ).aggregate(debit=Sum('debit'), credit=Sum('credit'))
     debit = totals['debit'] or Decimal('0')
     credit = totals['credit'] or Decimal('0')
@@ -84,9 +84,9 @@ def _cheque_issue_amounts(cheque: Cheque) -> tuple[Decimal, Decimal]:
     if cheque.direction == ChequeDirection.RECEIVABLE:
         return Decimal('0'), cheque.amount
 
-    # چک پرداختی: اگر از قبل به طرف حساب بدهکار بودیم، چک تسویه بدهی است (بدهکار).
-    # در غیر این صورت صدور چک یک تعهد/بدهی جدید ایجاد می‌کند (بستانکار).
-    if _party_balance_excluding_cheque(cheque.party, cheque.id) < 0:
+    # چک پرداختی: اگر بدهی واقعی (فاکتور خرید و …) داریم، چک تسویه است (بدهکار).
+    # در غیر این صورت — از جمله چند چک پرداختی پشت‌سرهم — تعهد جدید ثبت می‌شود (بستانکار).
+    if _party_non_cheque_balance(cheque.party) < 0:
         return cheque.amount, Decimal('0')
     return Decimal('0'), cheque.amount
 
