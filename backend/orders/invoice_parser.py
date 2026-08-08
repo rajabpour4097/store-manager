@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -12,6 +11,8 @@ from catalog.models import Product
 from core.jalali import parse_flexible_date
 from parties.models import Party, PartyType
 
+from .ocr_providers import OcrResult, ocr_capabilities, run_ocr
+
 
 @dataclass
 class ParsedLineItem:
@@ -20,6 +21,8 @@ class ParsedLineItem:
     unit_price: Decimal
     product_id: int | None = None
     match_score: float = 0.0
+    product_code: str = ''
+    will_create: bool = False
 
 
 @dataclass
@@ -27,11 +30,14 @@ class ParsedInvoice:
     party_name: str = ''
     party_id: int | None = None
     order_date: date | None = None
+    invoice_number: str = ''
     total_amount: Decimal | None = None
     items: list[ParsedLineItem] = field(default_factory=list)
     raw_text: str = ''
     confidence: int = 0
     warnings: list[str] = field(default_factory=list)
+    ocr_engine: str = ''
+    ocr_error: str = ''
 
 
 class InvoiceParseError(Exception):
@@ -43,25 +49,16 @@ def _normalize_persian(text: str) -> str:
         text.replace('۰', '0').replace('۱', '1').replace('۲', '2').replace('۳', '3')
         .replace('۴', '4').replace('۵', '5').replace('۶', '6').replace('۷', '7')
         .replace('۸', '8').replace('۹', '9')
-        .replace('ي', 'ی').replace('ك', 'ک')
+        .replace('ي', 'ی').replace('ك', 'ک').replace('‌', ' ')
     )
 
 
-def _extract_text(image_bytes: bytes) -> str:
-    """تلاش برای استخراج متن از تصویر؛ در صورت نبود OCR خالی برمی‌گردد."""
-    try:
-        import pytesseract  # type: ignore[import-untyped]
-        from PIL import Image
-
-        image = Image.open(io.BytesIO(image_bytes))
-        text = pytesseract.image_to_string(image, lang='fas+eng')
-        return _normalize_persian(text or '')
-    except Exception:
-        return ''
-
-
-def _parse_amount(value: str) -> Decimal | None:
-    cleaned = re.sub(r'[^\d.]', '', value.replace(',', ''))
+def _parse_amount(value) -> Decimal | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float, Decimal)):
+        return Decimal(str(value)).quantize(Decimal('1'))
+    cleaned = re.sub(r'[^\d.]', '', _normalize_persian(str(value)).replace(',', ''))
     if not cleaned:
         return None
     try:
@@ -70,14 +67,22 @@ def _parse_amount(value: str) -> Decimal | None:
         return None
 
 
+def _parse_quantity(value) -> Decimal:
+    parsed = _parse_amount(value)
+    if parsed is None or parsed <= 0:
+        return Decimal('1')
+    return parsed
+
+
 def _parse_date_from_text(text: str) -> date | None:
+    normalized = _normalize_persian(text)
     patterns = [
+        r'(?:تاریخ|date)\s*[:\-]?\s*(\d{4}[/-]\d{1,2}[/-]\d{1,2})',
         r'(\d{4}[/-]\d{1,2}[/-]\d{1,2})',
         r'(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
-        r'(\d{4}/\d{1,2}/\d{1,2})',
     ]
     for pattern in patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, normalized, re.IGNORECASE)
         if match:
             try:
                 return parse_flexible_date(match.group(1))
@@ -86,38 +91,124 @@ def _parse_date_from_text(text: str) -> date | None:
     return None
 
 
-def _match_product(name: str) -> tuple[int | None, float]:
-    """تطبیق نام کالا با موجودی فروشگاه."""
+def _tokenize_name(name: str) -> set[str]:
+    tokens = re.findall(r'[\w\u0600-\u06FF]+', name.lower())
+    return {t for t in tokens if len(t) >= 2}
+
+
+def match_product(name: str, product_code: str = '') -> tuple[int | None, float]:
+    """تطبیق نام/کد کالا با موجودی فروشگاه."""
     name = name.strip()
-    if len(name) < 2:
+    if len(name) < 2 and not product_code:
         return None, 0.0
 
-    products = Product.objects.filter(is_active=True)
+    products = list(Product.objects.filter(is_active=True))
     best_id: int | None = None
     best_score = 0.0
 
+    name_tokens = _tokenize_name(name)
     name_lower = name.lower()
+
     for product in products:
+        if product_code and product.sku and product_code.strip() == product.sku.strip():
+            return product.id, 1.0
+        if product.barcode and product_code and product_code.strip() == product.barcode.strip():
+            return product.id, 1.0
+
         pname = product.name.lower()
         if pname == name_lower:
             return product.id, 1.0
+
         if pname in name_lower or name_lower in pname:
             score = min(len(pname), len(name_lower)) / max(len(pname), len(name_lower))
             if score > best_score:
                 best_score = score
                 best_id = product.id
-        elif product.sku and product.sku.lower() in name_lower:
-            if 0.8 > best_score:
-                best_score = 0.8
+            continue
+
+        product_tokens = _tokenize_name(pname)
+        if name_tokens and product_tokens:
+            overlap = len(name_tokens & product_tokens) / max(len(name_tokens), len(product_tokens))
+            if overlap >= 0.5 and overlap > best_score:
+                best_score = overlap
                 best_id = product.id
 
     return best_id, best_score
 
 
-def _parse_line_items(text: str) -> list[ParsedLineItem]:
-    """استخراج ردیف‌های کالا از متن فاکتور."""
+def resolve_or_create_product(
+    name: str,
+    unit_price: Decimal,
+    *,
+    product_code: str = '',
+    create_if_missing: bool = False,
+) -> tuple[int | None, float, bool]:
+    product_id, score = match_product(name, product_code)
+    if product_id:
+        return product_id, score, False
+
+    if not create_if_missing or len(name.strip()) < 2:
+        return None, 0.0, False
+
+    product = Product.objects.create(
+        name=name.strip()[:200],
+        purchase_price=unit_price,
+        sale_price=max(unit_price, Decimal('0')),
+        sku=product_code.strip()[:40] if product_code else '',
+        description='ایجاد خودکار از فاکتور',
+    )
+    return product.id, 1.0, True
+
+
+def _extract_party_name(text: str) -> str:
+    normalized = _normalize_persian(text)
+    patterns = [
+        r'(?:نام\s*(?:خریدار|مشتری)?|خریدار|مشتری|buyer|customer)\s*[:\-]?\s*(.+)',
+        r'(?:فروشنده|تأمین|supplier|seller)\s*[:\-]?\s*(.+)',
+        r'(?:آقای|خانم)\s+(.+)',
+        r'(?:نام)\s*[:\-]?\s*(.+)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip()
+            candidate = re.split(r'[\d|]', candidate)[0].strip()
+            candidate = re.sub(r'\s+', ' ', candidate)
+            if len(candidate) >= 2 and not candidate.startswith('کد'):
+                return candidate[:200]
+    return ''
+
+
+def _extract_invoice_number(text: str) -> str:
+    normalized = _normalize_persian(text)
+    patterns = [
+        r'(?:شماره|فاکتور|حواله)\s*[:\-]?\s*(\d+)',
+        r'(?:invoice\s*no?\.?)\s*[:\-]?\s*(\d+)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return ''
+
+
+_SKIP_LINE_WORDS = (
+    'جمع', 'کل', 'مالیات', 'تخفیف', 'total', 'sum', 'invoice', 'فاکتور',
+    'شرح', 'تعداد', 'واحد', 'فی', 'ردیف', 'کد', 'نام کالا', 'مبلغ',
+    'تجمع', 'کسر', 'ریال', 'امضاء', 'امضا', 'توضیحات',
+)
+
+
+def _is_skip_line(name_part: str) -> bool:
+    lower = name_part.lower()
+    return any(word in lower for word in _SKIP_LINE_WORDS) or len(name_part) < 3
+
+
+def _parse_line_items_from_text(text: str) -> list[ParsedLineItem]:
+    """استخراج ردیف‌های کالا از متن OCR."""
     items: list[ParsedLineItem] = []
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    normalized = _normalize_persian(text)
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
 
     for line in lines:
         numbers = re.findall(r'[\d,]+(?:\.\d+)?', line)
@@ -129,21 +220,30 @@ def _parse_line_items(text: str) -> list[ParsedLineItem]:
         if len(amounts) < 2:
             continue
 
-        name_part = re.sub(r'[\d,.\s]+', ' ', line).strip()
-        name_part = re.sub(r'\s+', ' ', name_part)
-        if len(name_part) < 2:
+        name_part = re.sub(r'[\d,.\s|]+', ' ', line)
+        name_part = re.sub(r'\s+', ' ', name_part).strip()
+        if _is_skip_line(name_part):
             continue
 
-        skip_words = ('جمع', 'کل', 'مالیات', 'تخفیف', 'total', 'sum', 'invoice', 'فاکتور')
-        if any(word in name_part.lower() for word in skip_words):
+        # الگوی رایج فاکتور فارسی: نام | تعداد | فی | جمع
+        if len(amounts) >= 3:
+            quantity = amounts[-3]
+            unit_price = amounts[-2]
+            if amounts[-1] == quantity * unit_price or amounts[-1] > unit_price:
+                pass  # keep quantity & unit_price
+            else:
+                quantity = amounts[0]
+                unit_price = amounts[-2]
+        else:
+            quantity = amounts[0]
+            unit_price = amounts[-1]
+            if quantity > 10000 and unit_price < quantity:
+                quantity, unit_price = unit_price, quantity
+
+        if unit_price < 1000:  # likely not a price in Rials
             continue
 
-        quantity = amounts[0]
-        unit_price = amounts[-1] if len(amounts) >= 2 else Decimal('0')
-        if quantity > 10000 and unit_price < quantity:
-            quantity, unit_price = unit_price, quantity
-
-        product_id, score = _match_product(name_part)
+        product_id, score = match_product(name_part)
         items.append(ParsedLineItem(
             product_name=name_part,
             quantity=quantity,
@@ -152,7 +252,61 @@ def _parse_line_items(text: str) -> list[ParsedLineItem]:
             match_score=score,
         ))
 
-    return items[:50]
+    return _dedupe_items(items)[:50]
+
+
+def _dedupe_items(items: list[ParsedLineItem]) -> list[ParsedLineItem]:
+    seen: set[str] = set()
+    result: list[ParsedLineItem] = []
+    for item in items:
+        key = f'{item.product_name}|{item.quantity}|{item.unit_price}'
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def _parse_from_structured(data: dict) -> ParsedInvoice:
+    result = ParsedInvoice()
+    result.party_name = (data.get('party_name') or '').strip()
+    result.invoice_number = (data.get('invoice_number') or '').strip()
+
+    order_date_raw = data.get('order_date')
+    if order_date_raw:
+        try:
+            result.order_date = parse_flexible_date(str(order_date_raw))
+        except (ValueError, TypeError):
+            result.order_date = None
+
+    result.total_amount = _parse_amount(data.get('total_amount'))
+
+    for row in data.get('items') or []:
+        name = (row.get('product_name') or '').strip()
+        if not name:
+            continue
+        quantity = _parse_quantity(row.get('quantity'))
+        unit_price = _parse_amount(row.get('unit_price'))
+        if unit_price is None:
+            total = _parse_amount(row.get('total_price'))
+            if total and quantity:
+                unit_price = (total / quantity).quantize(Decimal('1'))
+            else:
+                continue
+
+        code = (row.get('product_code') or '').strip()
+        product_id, score = match_product(name, code)
+        result.items.append(ParsedLineItem(
+            product_name=name,
+            quantity=quantity,
+            unit_price=unit_price,
+            product_id=product_id,
+            match_score=score,
+            product_code=code,
+        ))
+
+    result.items = _dedupe_items(result.items)
+    return result
 
 
 def _find_party(name: str, order_type: str) -> tuple[int | None, str]:
@@ -164,11 +318,7 @@ def _find_party(name: str, order_type: str) -> tuple[int | None, str]:
     if party:
         return party.id, party.name
 
-    if order_type == 'purchase':
-        party_type = PartyType.SUPPLIER
-    else:
-        party_type = PartyType.CUSTOMER
-
+    party_type = PartyType.SUPPLIER if order_type == 'purchase' else PartyType.CUSTOMER
     party = Party.objects.create(
         name=name,
         party_type=party_type,
@@ -177,57 +327,18 @@ def _find_party(name: str, order_type: str) -> tuple[int | None, str]:
     return party.id, party.name
 
 
-def _extract_party_name(text: str) -> str:
-    patterns = [
-        r'(?:خریدار|مشتری|buyer|customer)\s*[:\-]?\s*(.+)',
-        r'(?:فروشنده|تأمین|supplier|seller)\s*[:\-]?\s*(.+)',
-        r'(?:نام)\s*[:\-]?\s*(.+)',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            candidate = match.group(1).strip()
-            candidate = re.split(r'\d', candidate)[0].strip()
-            if len(candidate) >= 2:
-                return candidate[:200]
-    return ''
-
-
-def parse_invoice_image(
-    image_bytes: bytes,
+def _finalize_result(
+    result: ParsedInvoice,
     *,
-    order_type: str = 'sale',
-    party_id: int | None = None,
+    order_type: str,
+    party_id: int | None,
+    ocr: OcrResult,
 ) -> ParsedInvoice:
-    """تحلیل تصویر فاکتور و برگرداندن داده‌های ساخت‌یافته."""
-    result = ParsedInvoice(order_date=date.today())
+    result.ocr_engine = ocr.engine
+    result.ocr_error = ocr.error
 
-    raw_text = _extract_text(image_bytes)
-    result.raw_text = raw_text
-
-    if raw_text:
-        result.order_date = _parse_date_from_text(raw_text) or date.today()
-        result.party_name = _extract_party_name(raw_text)
-        result.items = _parse_line_items(raw_text)
-
-        total_match = re.search(
-            r'(?:جمع\s*کل|مبلغ\s*کل|total)\s*[:\-]?\s*([\d,]+)',
-            raw_text, re.IGNORECASE,
-        )
-        if total_match:
-            result.total_amount = _parse_amount(total_match.group(1))
-
-        matched = sum(1 for item in result.items if item.product_id)
-        if result.items:
-            result.confidence = min(90, 30 + matched * 15 + (20 if result.party_name else 0))
-        else:
-            result.confidence = 15
-            result.warnings.append('ردیف کالا از تصویر شناسایی نشد؛ لطفاً دستی تکمیل کنید.')
-    else:
-        result.confidence = 10
-        result.warnings.append(
-            'متن فاکتور استخراج نشد. تصویر ذخیره می‌شود؛ اطلاعات را دستی وارد کنید.'
-        )
+    if not result.order_date:
+        result.order_date = date.today()
 
     if party_id:
         party = Party.objects.filter(pk=party_id).first()
@@ -239,16 +350,68 @@ def parse_invoice_image(
         result.party_id = pid
         result.party_name = pname
 
+    matched = sum(1 for item in result.items if item.product_id)
+    if result.items:
+        base = 40 if ocr.engine == 'openai' else 25
+        result.confidence = min(95, base + matched * 12 + (15 if result.party_name else 0))
+    elif ocr.error:
+        result.confidence = 5
+        result.warnings.append(ocr.error)
+    elif not result.raw_text and not ocr.structured:
+        result.confidence = 5
+        caps = ocr_capabilities()
+        if not caps['configured']:
+            result.warnings.append(
+                'موتور OCR نصب نیست. OPENAI_API_KEY را در .env تنظیم کنید '
+                'یا Tesseract را نصب کنید (sudo apt install tesseract-ocr tesseract-ocr-fas).'
+            )
+        else:
+            result.warnings.append('متن فاکتور استخراج نشد؛ لطفاً تصویر واضح‌تری آپلود کنید.')
+    else:
+        result.confidence = 15
+        result.warnings.append('ردیف کالا شناسایی نشد؛ اطلاعات را دستی تکمیل کنید.')
+
     if not result.party_id:
         result.warnings.append('طرف حساب شناسایی نشد؛ هنگام ذخیره انتخاب کنید.')
 
     unmatched = [item for item in result.items if not item.product_id]
     if unmatched:
         result.warnings.append(
-            f'{len(unmatched)} کالا با موجودی تطبیق داده نشد؛ قبل از تأیید بررسی کنید.'
+            f'{len(unmatched)} کالا در انبار یافت نشد. '
+            'با گزینه «ایجاد کالاهای جدید» می‌توانید آن‌ها را بسازید.'
         )
 
     if result.confidence < 50:
-        result.warnings.append('اطمینان استخراج پایین است؛ حتماً قبل از تأیید بررسی کنید.')
+        result.warnings.append('اطمینان استخراج پایین است؛ قبل از تأیید بررسی کنید.')
 
     return result
+
+
+def parse_invoice_image(
+    image_bytes: bytes,
+    *,
+    order_type: str = 'sale',
+    party_id: int | None = None,
+) -> ParsedInvoice:
+    """تحلیل تصویر فاکتور و برگرداندن داده‌های ساخت‌یافته."""
+    ocr = run_ocr(image_bytes)
+
+    if ocr.structured:
+        result = _parse_from_structured(ocr.structured)
+        result.raw_text = ocr.raw_text
+    else:
+        result = ParsedInvoice(order_date=date.today())
+        result.raw_text = _normalize_persian(ocr.raw_text)
+        if result.raw_text:
+            result.order_date = _parse_date_from_text(result.raw_text) or date.today()
+            result.party_name = _extract_party_name(result.raw_text)
+            result.invoice_number = _extract_invoice_number(result.raw_text)
+            result.items = _parse_line_items_from_text(result.raw_text)
+            total_match = re.search(
+                r'(?:جمع\s*کل|جمع|total)\s*[:\-]?\s*([\d,]+)',
+                result.raw_text, re.IGNORECASE,
+            )
+            if total_match:
+                result.total_amount = _parse_amount(total_match.group(1))
+
+    return _finalize_result(result, order_type=order_type, party_id=party_id, ocr=ocr)

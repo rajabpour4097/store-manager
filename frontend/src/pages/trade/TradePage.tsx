@@ -17,7 +17,7 @@ import { Badge, ORDER_STATUS_TONES, PAYMENT_STATUS_TONES } from '@/components/ui
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { DataTable, Pagination, type Column } from '@/components/ui/DataTable'
-import { SelectInput } from '@/components/ui/Field'
+import { SelectInput, Switch } from '@/components/ui/Field'
 import { ConfirmDialog } from '@/components/ui/Modal'
 import { Money, PageHeader, StatCard, Tabs } from '@/components/ui/Misc'
 import { AsyncSelect } from '@/components/ui/AsyncSelect'
@@ -59,6 +59,7 @@ export function TradePage() {
   const [previewFile, setPreviewFile] = useState<File | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [savingAuto, setSavingAuto] = useState(false)
+  const [createMissingProducts, setCreateMissingProducts] = useState(true)
 
   const partySearch = useCallback(
     (term: string) => searchPartiesForOrder(term, autoOrderType),
@@ -143,6 +144,7 @@ export function TradePage() {
       form.append('image', previewFile)
       form.append('order_type', autoOrderType)
       form.append('confirm', 'true')
+      form.append('create_missing_products', createMissingProducts ? 'true' : 'false')
       if (autoParty) form.append('party', String(autoParty))
       else if (preview?.party_id) form.append('party', String(preview.party_id))
 
@@ -334,6 +336,28 @@ export function TradePage() {
 
       {tab === 'automatic' && can('orders.upload_invoice') && (
         <Card className="mb-5" bodyClassName="!py-5">
+          {options?.ocr_capabilities && !options.ocr_capabilities.configured && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <p className="font-semibold">موتور OCR فعال نیست</p>
+              <p className="mt-1">
+                برای شناسایی خودکار فاکتور، یکی از این دو را راه‌اندازی کنید:
+              </p>
+              <ul className="mt-2 list-inside list-disc space-y-1">
+                <li>
+                  <strong>OpenAI Vision (پیشنهادی):</strong> کلید API را در فایل{' '}
+                  <code className="rounded bg-amber-100 px-1">.env</code> قرار دهید:{' '}
+                  <code className="rounded bg-amber-100 px-1">OPENAI_API_KEY=sk-...</code>
+                </li>
+                <li>
+                  <strong>Tesseract (محلی):</strong>{' '}
+                  <code className="rounded bg-amber-100 px-1">
+                    sudo apt install tesseract-ocr tesseract-ocr-fas
+                  </code>
+                </li>
+              </ul>
+            </div>
+          )}
+
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
               <h3 className="mb-1 font-semibold text-ink-800 dark:text-ink-100">
@@ -398,9 +422,16 @@ export function TradePage() {
             <div className="mt-5 rounded-xl border border-brand-200 bg-brand-50/50 p-4 dark:border-brand-500/30 dark:bg-brand-500/5">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h4 className="font-semibold">نتیجه استخراج</h4>
-                <Badge tone={preview.confidence >= 50 ? 'success' : 'warning'}>
-                  اطمینان {toPersianDigits(preview.confidence)}٪
-                </Badge>
+                <div className="flex flex-wrap gap-2">
+                  {preview.ocr_engine && (
+                    <Badge tone="brand">
+                      موتور: {preview.ocr_engine === 'openai' ? 'OpenAI Vision' : preview.ocr_engine}
+                    </Badge>
+                  )}
+                  <Badge tone={preview.confidence >= 50 ? 'success' : 'warning'}>
+                    اطمینان {toPersianDigits(preview.confidence)}٪
+                  </Badge>
+                </div>
               </div>
 
               {preview.warnings.length > 0 && (
@@ -458,13 +489,24 @@ export function TradePage() {
               )}
 
               {can('orders.add') && (
-                <Button
-                  icon={<Plus size={16} />}
-                  onClick={() => setConfirmOpen(true)}
-                  disabled={!preview.party_id && !autoParty}
-                >
-                  ثبت پیش‌نویس سفارش
-                </Button>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Switch
+                    label="ایجاد خودکار کالاهای جدید"
+                    checked={createMissingProducts}
+                    onChange={setCreateMissingProducts}
+                    hint="کالاهایی که در انبار نیستند، هنگام ثبت ساخته می‌شوند"
+                  />
+                  <Button
+                    icon={<Plus size={16} />}
+                    onClick={() => setConfirmOpen(true)}
+                    disabled={
+                      (!preview.party_id && !autoParty) ||
+                      preview.items.length === 0
+                    }
+                  >
+                    ثبت پیش‌نویس سفارش
+                  </Button>
+                </div>
               )}
             </div>
           )}

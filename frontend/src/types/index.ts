@@ -547,6 +547,14 @@ export interface OrderSummary {
   manual_total?: number
 }
 
+export interface OcrCapabilities {
+  engines: string[]
+  recommended: string | null
+  configured: boolean
+  openai: boolean
+  tesseract: boolean
+}
+
 export interface OrderOptions {
   order_types: Choice[]
   statuses: Choice[]
@@ -556,19 +564,23 @@ export interface OrderOptions {
   suggestion_statuses: Choice[]
   priorities: Choice[]
   weekdays: NumericChoice[]
+  ocr_capabilities?: OcrCapabilities
 }
 
 export interface ParsedInvoiceItem {
   product_name: string
   product_id: number | null
+  product_code?: string
   quantity: string
   unit_price: string
   match_score: number
+  matched?: boolean
 }
 
 export interface ParsedInvoice {
   party_name: string
   party_id: number | null
+  invoice_number?: string
   order_date: string
   order_date_jalali: string
   total_amount: string | null
@@ -576,11 +588,14 @@ export interface ParsedInvoice {
   warnings: string[]
   items: ParsedInvoiceItem[]
   raw_text: string
+  ocr_engine?: string
+  ocr_error?: string
 }
 
 export interface InvoiceUploadPreview {
   parsed: ParsedInvoice
   requires_party: boolean
+  ocr_capabilities?: OcrCapabilities
 }
 
 // ---------------------------------------------------------------- سوابق و پیشنهاد

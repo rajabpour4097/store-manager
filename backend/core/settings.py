@@ -176,6 +176,11 @@ SUGGESTION_MIN_DATA_POINTS = int(os.getenv('SUGGESTION_MIN_DATA_POINTS', '5'))
 # درصد مالیات بر ارزش افزوده پیش‌فرض
 DEFAULT_VAT_PERCENT = float(os.getenv('DEFAULT_VAT_PERCENT', '10'))
 
+# OCR فاکتور: auto | openai | tesseract
+INVOICE_OCR_PROVIDER = os.getenv('INVOICE_OCR_PROVIDER', 'auto')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+OPENAI_VISION_MODEL = os.getenv('OPENAI_VISION_MODEL', 'gpt-4o-mini')
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

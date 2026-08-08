@@ -483,3 +483,69 @@ class SuggestionEngineTests(TestCase):
         response = client.get(f'/api/suggestions/analyze/{product.id}/')
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data['has_data'])
+
+
+class InvoiceParserTests(TestCase):
+    SAMPLE_TEXT = """
+    فاکتور فروش
+    تاریخ: 1403/10/19
+    شماره: 4525
+    نام: رجب پور محمد
+    ال ای دی سونیا 43 - 6580  3  159,900,000  479,700,000
+    ال ای دی سونیا 55 - 9680  4  321,500,000  1,286,000,000
+    جمع کل  4,371,651,000
+    """
+
+    def test_parse_persian_invoice_text(self):
+        from .invoice_parser import _parse_line_items_from_text, _extract_party_name
+
+        party = _extract_party_name(self.SAMPLE_TEXT)
+        self.assertIn('رجب', party)
+
+        items = _parse_line_items_from_text(self.SAMPLE_TEXT)
+        self.assertGreaterEqual(len(items), 2)
+        self.assertIn('سونیا', items[0].product_name)
+
+    def test_match_product_by_tokens(self):
+        from .invoice_parser import match_product
+
+        product = Product.objects.create(
+            name='ال ای دی سونیا 43',
+            purchase_price=150_000_000,
+            sale_price=180_000_000,
+        )
+        pid, score = match_product('ال ای دی سونیا 43 - 6580')
+        self.assertEqual(pid, product.id)
+        self.assertGreaterEqual(score, 0.5)
+
+    def test_create_missing_product_on_confirm(self):
+        from .services import create_order_from_invoice
+        from .models import EntryMode
+
+        party = Party.objects.create(name='تأمین‌کننده', party_type=PartyType.SUPPLIER)
+        order = create_order_from_invoice(
+            order_type=OrderType.PURCHASE,
+            party=party,
+            order_date=date.today(),
+            invoice_image=None,
+            parsed_payload={},
+            ocr_confidence=80,
+            ocr_status='done',
+            items_data=[{
+                'product_name': 'جاروبرقی FALCO S3 سفید',
+                'quantity': Decimal('1'),
+                'unit_price': Decimal('61000000'),
+            }],
+            create_missing_products=True,
+            user=None,
+        )
+        self.assertEqual(order.items.count(), 1)
+        self.assertTrue(Product.objects.filter(name__icontains='FALCO').exists())
+        self.assertEqual(order.entry_mode, EntryMode.AUTOMATIC)
+
+    def test_options_include_ocr_capabilities(self):
+        client = APIClient()
+        client.force_authenticate(User.objects.create_user(username='ocr', password='x', role=Role.MANAGER))
+        response = client.get('/api/orders/options/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('ocr_capabilities', response.data)

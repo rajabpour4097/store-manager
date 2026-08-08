@@ -16,6 +16,7 @@ from core.jalali import parse_flexible_date, to_jalali
 from parties.models import Party
 
 from .importers import ImportError_, build_sample_csv, import_sales_csv
+from .ocr_providers import ocr_capabilities
 from .invoice_parser import InvoiceParseError, parse_invoice_image
 from .models import (
     EntryMode,
@@ -239,19 +240,23 @@ class OrderViewSet(viewsets.ModelViewSet):
         parsed_items = [{
             'product_name': item.product_name,
             'product_id': item.product_id,
+            'product_code': item.product_code,
             'quantity': str(item.quantity),
             'unit_price': str(item.unit_price),
             'match_score': item.match_score,
+            'matched': item.product_id is not None,
         } for item in parsed.items]
 
         ocr_status = OcrStatus.DONE if parsed.confidence >= 50 else OcrStatus.REVIEW
         payload = {
             'party_name': parsed.party_name,
+            'invoice_number': parsed.invoice_number,
             'order_date': parsed.order_date.isoformat() if parsed.order_date else None,
             'total_amount': str(parsed.total_amount) if parsed.total_amount else None,
             'items': parsed_items,
             'warnings': parsed.warnings,
             'raw_text': parsed.raw_text[:2000],
+            'ocr_engine': parsed.ocr_engine,
         }
 
         if not data.get('confirm'):
@@ -259,6 +264,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                 'parsed': {
                     'party_name': parsed.party_name,
                     'party_id': parsed.party_id,
+                    'invoice_number': parsed.invoice_number,
                     'order_date': parsed.order_date,
                     'order_date_jalali': to_jalali(parsed.order_date),
                     'total_amount': parsed.total_amount,
@@ -266,8 +272,11 @@ class OrderViewSet(viewsets.ModelViewSet):
                     'warnings': parsed.warnings,
                     'items': parsed_items,
                     'raw_text': parsed.raw_text[:500],
+                    'ocr_engine': parsed.ocr_engine,
+                    'ocr_error': parsed.ocr_error,
                 },
                 'requires_party': parsed.party_id is None,
+                'ocr_capabilities': ocr_capabilities(),
             })
 
         if not parsed.party_id and not party_id:
@@ -283,12 +292,19 @@ class OrderViewSet(viewsets.ModelViewSet):
         items_data = [
             {
                 'product': item.product_id,
+                'product_name': item.product_name,
+                'product_code': item.product_code,
                 'quantity': item.quantity,
                 'unit_price': item.unit_price,
             }
             for item in parsed.items
-            if item.product_id
         ]
+
+        if not items_data:
+            return Response(
+                {'detail': 'هیچ ردیف کالایی شناسایی نشد. OCR را فعال کنید یا اطلاعات را دستی وارد کنید.'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
 
         uploaded.seek(0)
         order = create_order_from_invoice(
@@ -300,6 +316,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             ocr_confidence=parsed.confidence,
             ocr_status=ocr_status,
             items_data=items_data,
+            create_missing_products=data.get('create_missing_products', True),
             user=request.user,
         )
 

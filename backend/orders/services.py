@@ -252,9 +252,11 @@ def create_order_from_invoice(
     ocr_confidence: int,
     ocr_status: str,
     items_data: list[dict],
+    create_missing_products: bool = True,
     user=None,
 ) -> Order:
     """ساخت پیش‌نویس سفارش از فاکتور آپلود‌شده."""
+    from .invoice_parser import resolve_or_create_product
     from .models import EntryMode, OrderItem
 
     order = Order.objects.create(
@@ -271,19 +273,38 @@ def create_order_from_invoice(
         created_by=user,
     )
 
+    created_products = 0
     for item in items_data:
         product_id = item.get('product')
+        product_name = (item.get('product_name') or '').strip()
+        unit_price = Decimal(str(item.get('unit_price', 0)))
+        quantity = Decimal(str(item.get('quantity', 1)))
+
+        if not product_id and product_name:
+            product_id, _, created = resolve_or_create_product(
+                product_name,
+                unit_price,
+                product_code=item.get('product_code', ''),
+                create_if_missing=create_missing_products,
+            )
+            if created:
+                created_products += 1
+
         if not product_id:
             continue
+
         OrderItem.objects.create(
             order=order,
             product_id=product_id,
-            quantity=item['quantity'],
-            unit_price=item['unit_price'],
-            unit_cost=item.get('unit_cost', item['unit_price']),
+            quantity=quantity,
+            unit_price=unit_price,
+            unit_cost=item.get('unit_cost', unit_price),
             discount_amount=item.get('discount_amount', 0),
             description=item.get('description', ''),
         )
 
     order.recalculate()
+    if created_products:
+        order.description += f'\n{created_products} کالای جدید از فاکتور ایجاد شد.'
+        order.save(update_fields=['description', 'modified_at'])
     return order
