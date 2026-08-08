@@ -17,7 +17,7 @@ from parties.models import Party
 
 from .importers import ImportError_, build_sample_csv, import_sales_csv
 from .ocr_providers import ocr_capabilities
-from .invoice_parser import InvoiceParseError, parse_invoice_image
+from .invoice_parser import InvoiceParseError, build_items_from_client, parse_invoice_image
 from .models import (
     EntryMode,
     Order,
@@ -278,6 +278,17 @@ class OrderViewSet(viewsets.ModelViewSet):
                 'requires_party': parsed.party_id is None,
                 'ocr_capabilities': ocr_capabilities(),
             })
+
+        # ردیف‌های ویرایش‌شده توسط کاربر (اولویت بر OCR مجدد)
+        client_items_raw = request.data.get('items')
+        if client_items_raw:
+            import json as json_lib
+            if isinstance(client_items_raw, str):
+                client_items_raw = json_lib.loads(client_items_raw)
+            client_items = build_items_from_client(client_items_raw)
+            if client_items:
+                parsed.items = client_items
+                parsed.confidence = min(95, parsed.confidence + 20)
 
         if not parsed.party_id and not party_id:
             return Response(

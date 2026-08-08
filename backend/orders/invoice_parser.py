@@ -199,9 +199,79 @@ _SKIP_LINE_WORDS = (
 )
 
 
+def _is_valid_product_name(name: str) -> bool:
+    """رد کردن خروجی نویزی OCR."""
+    name = name.strip()
+    if len(name) < 4:
+        return False
+    if re.search(r'[\\|{}~`^]', name):
+        return False
+
+    persian = len(re.findall(r'[\u0600-\u06FF]', name))
+    latin = len(re.findall(r'[a-zA-Z]', name))
+    digits_only = re.sub(r'[\d\s,./-]', '', name)
+
+    if not digits_only:
+        return False
+
+    # نام باید حداقل ۳ حرف فارسی یا ۴ حرف لاتین (برند) داشته باشد
+    if persian >= 3:
+        ratio = persian / max(len(name.replace(' ', '')), 1)
+        return ratio >= 0.2
+
+    if latin >= 4:
+        return True
+
+    return False
+
+
+def _is_valid_line_item(name: str, quantity: Decimal, unit_price: Decimal) -> bool:
+    if not _is_valid_product_name(name):
+        return False
+    if quantity <= 0 or quantity > 100_000:
+        return False
+    if unit_price < 1000:
+        return False
+    # قیمت واحد معمولاً از ۱۰۰۰ ریال بیشتر و quantity معمولاً کوچک‌تر از قیمت
+    if quantity > unit_price and unit_price > 100_000:
+        return False
+    return True
+
+
+def build_items_from_client(rows: list[dict]) -> list[ParsedLineItem]:
+    """ساخت ردیف‌ها از داده ویرایش‌شده توسط کاربر."""
+    items: list[ParsedLineItem] = []
+    for row in rows:
+        name = (row.get('product_name') or '').strip()
+        if not name:
+            continue
+        quantity = _parse_quantity(row.get('quantity'))
+        unit_price = _parse_amount(row.get('unit_price'))
+        if unit_price is None:
+            continue
+        code = (row.get('product_code') or '').strip()
+        product_id = row.get('product_id')
+        score = 0.0
+        if product_id:
+            score = 1.0
+        else:
+            product_id, score = match_product(name, code)
+        items.append(ParsedLineItem(
+            product_name=name,
+            quantity=quantity,
+            unit_price=unit_price,
+            product_id=product_id,
+            match_score=score,
+            product_code=code,
+        ))
+    return _dedupe_items(items)
+
+
 def _is_skip_line(name_part: str) -> bool:
     lower = name_part.lower()
-    return any(word in lower for word in _SKIP_LINE_WORDS) or len(name_part) < 3
+    if any(word in lower for word in _SKIP_LINE_WORDS):
+        return True
+    return not _is_valid_product_name(name_part)
 
 
 def _parse_line_items_from_text(text: str) -> list[ParsedLineItem]:
@@ -240,7 +310,10 @@ def _parse_line_items_from_text(text: str) -> list[ParsedLineItem]:
             if quantity > 10000 and unit_price < quantity:
                 quantity, unit_price = unit_price, quantity
 
-        if unit_price < 1000:  # likely not a price in Rials
+        if unit_price < 1000:
+            continue
+
+        if not _is_valid_line_item(name_part, quantity, unit_price):
             continue
 
         product_id, score = match_product(name_part)
@@ -283,7 +356,7 @@ def _parse_from_structured(data: dict) -> ParsedInvoice:
 
     for row in data.get('items') or []:
         name = (row.get('product_name') or '').strip()
-        if not name:
+        if not name or not _is_valid_product_name(name):
             continue
         quantity = _parse_quantity(row.get('quantity'))
         unit_price = _parse_amount(row.get('unit_price'))
@@ -352,8 +425,8 @@ def _finalize_result(
 
     matched = sum(1 for item in result.items if item.product_id)
     if result.items:
-        base = 40 if ocr.engine == 'openai' else 25
-        result.confidence = min(95, base + matched * 12 + (15 if result.party_name else 0))
+        base = 55 if ocr.engine == 'openai' else min(45, 15 + ocr.quality_score // 20)
+        result.confidence = min(95, base + matched * 10 + (10 if result.party_name else 0))
     elif ocr.error:
         result.confidence = 5
         result.warnings.append(ocr.error)
@@ -361,15 +434,19 @@ def _finalize_result(
         result.confidence = 5
         caps = ocr_capabilities()
         if not caps['configured']:
-            result.warnings.append(
-                'موتور OCR نصب نیست. OPENAI_API_KEY را در .env تنظیم کنید '
-                'یا Tesseract را نصب کنید (sudo apt install tesseract-ocr tesseract-ocr-fas).'
-            )
+            result.warnings.append('موتور OCR نصب نیست. OPENAI_API_KEY را در .env تنظیم کنید.')
         else:
             result.warnings.append('متن فاکتور استخراج نشد؛ لطفاً تصویر واضح‌تری آپلود کنید.')
     else:
-        result.confidence = 15
-        result.warnings.append('ردیف کالا شناسایی نشد؛ اطلاعات را دستی تکمیل کنید.')
+        result.confidence = 10
+        result.warnings.append('ردیف کالا شناسایی نشد؛ ردیف‌ها را دستی وارد یا ویرایش کنید.')
+
+    if ocr.engine == 'tesseract' and result.confidence < 60:
+        result.warnings.insert(0,
+            'Tesseract برای فاکتورهای فارسی دقت پایینی دارد. '
+            'برای نتیجه دقیق OPENAI_API_KEY را در .env تنظیم کنید، '
+            'یا ردیف‌های زیر را دستی ویرایش کنید.'
+        )
 
     if not result.party_id:
         result.warnings.append('طرف حساب شناسایی نشد؛ هنگام ذخیره انتخاب کنید.')

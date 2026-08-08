@@ -35,6 +35,14 @@ import type { InvoiceUploadPreview, Order, OrderListItem, OrderType, ParsedInvoi
 
 type TradeTab = 'manual' | 'automatic'
 
+interface EditableItem {
+  key: string
+  product_name: string
+  quantity: string
+  unit_price: string
+  product_id: number | null
+}
+
 export function TradePage() {
   const { can } = useAuth()
   const toast = useToast()
@@ -60,6 +68,7 @@ export function TradePage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [savingAuto, setSavingAuto] = useState(false)
   const [createMissingProducts, setCreateMissingProducts] = useState(true)
+  const [editItems, setEditItems] = useState<EditableItem[]>([])
 
   const partySearch = useCallback(
     (term: string) => searchPartiesForOrder(term, autoOrderType),
@@ -122,8 +131,24 @@ export function TradePage() {
 
       const result = await ordersApi.uploadInvoice(form)
       if ('parsed' in result) {
-        setPreview((result as InvoiceUploadPreview).parsed)
-        toast.success('فاکتور تحلیل شد. اطلاعات را بررسی کنید.')
+        const parsed = (result as InvoiceUploadPreview).parsed
+        setPreview(parsed)
+        setEditItems(
+          parsed.items.length > 0
+            ? parsed.items.map((item, idx) => ({
+                key: `${Date.now()}-${idx}`,
+                product_name: item.product_name,
+                quantity: item.quantity,
+                unit_price: item.unit_price,
+                product_id: item.product_id,
+              }))
+            : [{ key: `${Date.now()}`, product_name: '', quantity: '1', unit_price: '', product_id: null }],
+        )
+        if (parsed.items.length === 0) {
+          toast.warning('ردیفی شناسایی نشد. لطفاً ردیف‌ها را دستی وارد کنید.')
+        } else {
+          toast.success('فاکتور تحلیل شد. ردیف‌ها را بررسی و در صورت نیاز ویرایش کنید.')
+        }
       }
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : 'تحلیل فاکتور انجام نشد.')
@@ -138,6 +163,13 @@ export function TradePage() {
 
   const saveAutomatic = async () => {
     if (!previewFile) return
+    const validItems = editItems.filter(
+      (item) => item.product_name.trim() && item.quantity && item.unit_price,
+    )
+    if (validItems.length === 0) {
+      toast.error('حداقل یک ردیف کالا با نام، تعداد و قیمت وارد کنید.')
+      return
+    }
     setSavingAuto(true)
     try {
       const form = new FormData()
@@ -145,6 +177,17 @@ export function TradePage() {
       form.append('order_type', autoOrderType)
       form.append('confirm', 'true')
       form.append('create_missing_products', createMissingProducts ? 'true' : 'false')
+      form.append(
+        'items',
+        JSON.stringify(
+          validItems.map((item) => ({
+            product_name: item.product_name.trim(),
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            product_id: item.product_id,
+          })),
+        ),
+      )
       if (autoParty) form.append('party', String(autoParty))
       else if (preview?.party_id) form.append('party', String(preview.party_id))
 
@@ -153,6 +196,7 @@ export function TradePage() {
       setPreview(null)
       setPreviewFile(null)
       setPreviewImage(null)
+      setEditItems([])
       setConfirmOpen(false)
       setTab('manual')
       refresh()
@@ -453,40 +497,117 @@ export function TradePage() {
                 </div>
                 <div>
                   <span className="text-ink-400">ردیف‌ها: </span>
-                  {toPersianDigits(preview.items.length)}
+                  {toPersianDigits(editItems.filter((i) => i.product_name.trim()).length)}
                 </div>
               </div>
 
-              {preview.items.length > 0 && (
-                <div className="mb-4 overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-ink-200 text-ink-500 dark:border-ink-700">
-                        <th className="py-2 text-right">کالا</th>
-                        <th className="py-2 text-right">تعداد</th>
-                        <th className="py-2 text-right">قیمت</th>
-                        <th className="py-2 text-right">تطبیق</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {preview.items.map((item, idx) => (
-                        <tr key={idx} className="border-b border-ink-100 dark:border-ink-800">
-                          <td className="py-2">{item.product_name}</td>
-                          <td className="num py-2">{formatQuantity(item.quantity)}</td>
-                          <td className="num py-2">{formatQuantity(item.unit_price)}</td>
-                          <td className="py-2">
-                            {item.product_id ? (
-                              <Badge tone="success">شناسایی شد</Badge>
-                            ) : (
-                              <Badge tone="warning">نیاز به بررسی</Badge>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {preview && preview.ocr_engine === 'tesseract' && preview.confidence < 60 && (
+                <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                  Tesseract برای این نوع فاکتور دقیق نیست. ردیف‌ها را ویرایش کنید یا{' '}
+                  <strong>OPENAI_API_KEY</strong> را در سرور تنظیم کنید.
                 </div>
               )}
+
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm font-semibold text-ink-700 dark:text-ink-200">
+                  ردیف‌های کالا (قابل ویرایش)
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  icon={<Plus size={14} />}
+                  onClick={() =>
+                    setEditItems((current) => [
+                      ...current,
+                      {
+                        key: `${Date.now()}-${Math.random()}`,
+                        product_name: '',
+                        quantity: '1',
+                        unit_price: '',
+                        product_id: null,
+                      },
+                    ])
+                  }
+                >
+                  افزودن ردیف
+                </Button>
+              </div>
+
+              <div className="mb-4 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-ink-200 text-ink-500 dark:border-ink-700">
+                      <th className="py-2 text-right">نام کالا</th>
+                      <th className="w-24 py-2 text-right">تعداد</th>
+                      <th className="w-36 py-2 text-right">قیمت واحد</th>
+                      <th className="w-12 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editItems.map((item) => (
+                      <tr key={item.key} className="border-b border-ink-100 dark:border-ink-800">
+                        <td className="py-2 pe-2">
+                          <input
+                            className="input w-full min-w-[180px] text-sm"
+                            value={item.product_name}
+                            placeholder="نام کالا…"
+                            onChange={(e) =>
+                              setEditItems((current) =>
+                                current.map((row) =>
+                                  row.key === item.key
+                                    ? { ...row, product_name: e.target.value, product_id: null }
+                                    : row,
+                                ),
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-2 pe-2">
+                          <input
+                            className="input num w-full text-sm"
+                            value={item.quantity}
+                            inputMode="decimal"
+                            onChange={(e) =>
+                              setEditItems((current) =>
+                                current.map((row) =>
+                                  row.key === item.key ? { ...row, quantity: e.target.value } : row,
+                                ),
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-2 pe-2">
+                          <input
+                            className="input num w-full text-sm"
+                            value={item.unit_price}
+                            inputMode="decimal"
+                            placeholder="ریال"
+                            onChange={(e) =>
+                              setEditItems((current) =>
+                                current.map((row) =>
+                                  row.key === item.key ? { ...row, unit_price: e.target.value } : row,
+                                ),
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="py-2">
+                          <button
+                            type="button"
+                            className="rounded-lg p-1.5 text-ink-400 hover:bg-rose-50 hover:text-rose-600"
+                            onClick={() =>
+                              setEditItems((current) => current.filter((row) => row.key !== item.key))
+                            }
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               {can('orders.add') && (
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -499,10 +620,7 @@ export function TradePage() {
                   <Button
                     icon={<Plus size={16} />}
                     onClick={() => setConfirmOpen(true)}
-                    disabled={
-                      (!preview.party_id && !autoParty) ||
-                      preview.items.length === 0
-                    }
+                    disabled={!autoParty && !preview?.party_id}
                   >
                     ثبت پیش‌نویس سفارش
                   </Button>

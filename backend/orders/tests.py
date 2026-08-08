@@ -518,6 +518,12 @@ class InvoiceParserTests(TestCase):
         self.assertEqual(pid, product.id)
         self.assertGreaterEqual(score, 0.5)
 
+    def test_rejects_garbage_ocr_lines(self):
+        from .invoice_parser import _is_valid_product_name
+
+        self.assertFalse(_is_valid_product_name('oeoe : فقره : ve ne \\ Cee'))
+        self.assertTrue(_is_valid_product_name('جاروبرقی FALCO S3 سفید'))
+
     def test_create_missing_product_on_confirm(self):
         from .services import create_order_from_invoice
         from .models import EntryMode
