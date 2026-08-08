@@ -37,6 +37,7 @@ ACCOUNTANT_CAPABILITIES = {
     'orders.delete': False,
     'orders.confirm': False,
     'orders.import_sales': True,
+    'orders.upload_invoice': True,
     'reports.view': True,
     'reports.profit_loss': True,
     'users.manage': False,

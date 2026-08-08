@@ -1,5 +1,6 @@
 import {
   ArrowDownToLine,
+  ArrowLeftRight,
   ArrowUpFromLine,
   BadgeDollarSign,
   Banknote,
@@ -16,6 +17,7 @@ import {
   ShoppingCart,
   UserCog,
   Users,
+  Warehouse,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -69,6 +71,23 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/ledger', label: 'دفتر بدهکار و بستانکار', icon: ScrollText, capability: 'ledger.view' },
       { to: '/finance', label: 'هزینه و درآمد', icon: Receipt, capability: 'ledger.view' },
       { to: '/banks', label: 'حساب‌های بانکی', icon: Banknote, capability: 'ledger.view' },
+    ],
+  },
+  {
+    title: 'خرید و فروش',
+    items: [
+      {
+        to: '/trade',
+        label: 'خرید و فروش',
+        icon: ArrowLeftRight,
+        capability: 'orders.view',
+      },
+      {
+        to: '/warehouse',
+        label: 'آمار انبار',
+        icon: Warehouse,
+        capability: 'reports.view',
+      },
     ],
   },
   {

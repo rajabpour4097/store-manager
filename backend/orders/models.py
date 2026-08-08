@@ -25,6 +25,19 @@ class PaymentStatus(models.TextChoices):
     PAID = 'paid', 'تسویه شده'
 
 
+class EntryMode(models.TextChoices):
+    MANUAL = 'manual', 'دستی'
+    AUTOMATIC = 'automatic', 'اتوماتیک'
+
+
+class OcrStatus(models.TextChoices):
+    PENDING = 'pending', 'در انتظار'
+    PROCESSING = 'processing', 'در حال پردازش'
+    DONE = 'done', 'انجام شده'
+    REVIEW = 'review', 'نیاز به بررسی'
+    FAILED = 'failed', 'ناموفق'
+
+
 class Order(BaseModel):
     """سفارش فروش یا خرید."""
 
@@ -74,6 +87,15 @@ class Order(BaseModel):
         'orders.PurchaseSuggestion', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='generated_orders', verbose_name='پیشنهاد مبدأ',
     )
+
+    entry_mode = models.CharField(max_length=15, choices=EntryMode.choices,
+                                  default=EntryMode.MANUAL, verbose_name='روش ثبت')
+    invoice_image = models.ImageField(upload_to='invoices/', blank=True, null=True,
+                                      verbose_name='تصویر فاکتور')
+    ocr_status = models.CharField(max_length=15, choices=OcrStatus.choices,
+                                  default=OcrStatus.PENDING, verbose_name='وضعیت استخراج')
+    ocr_payload = models.JSONField(default=dict, blank=True, verbose_name='داده استخراج‌شده')
+    ocr_confidence = models.PositiveSmallIntegerField(default=0, verbose_name='درصد اطمینان OCR')
 
     class Meta:
         verbose_name = 'سفارش'

@@ -89,6 +89,12 @@ class ProfitLossTests(TestCase):
         self.assertEqual(report['total_products'], 1)
         self.assertEqual(report['total_stock_value'], Decimal('900000'))
 
+    def test_warehouse_stats(self):
+        report = services.warehouse_stats(self.today - timedelta(days=60), self.today)
+        self.assertIn('summary', report)
+        self.assertGreater(report['summary']['quantity_out'], Decimal('0'))
+        self.assertEqual(report['summary']['total_products'], 1)
+
     def test_receivables_report(self):
         report = services.receivables_payables()
         self.assertEqual(report['debtor_count'], 1)

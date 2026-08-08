@@ -52,6 +52,14 @@ const LINKS = [
     tone: 'from-amber-500 to-orange-500',
   },
   {
+    to: '/warehouse',
+    title: 'آمار گردش انبار',
+    description: 'ورود و خروج کالا، گردش روزانه و وضعیت موجودی',
+    icon: Boxes,
+    capability: 'reports.view' as const,
+    tone: 'from-indigo-500 to-violet-500',
+  },
+  {
     to: '/reports/inventory',
     title: 'گزارش موجودی',
     description: 'ارزش انبار، کمبود موجودی و تفکیک دسته‌ها',

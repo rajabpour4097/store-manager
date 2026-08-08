@@ -17,7 +17,7 @@ import { ConfirmDialog, Modal } from '@/components/ui/Modal'
 import { Money, PageHeader } from '@/components/ui/Misc'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
-import { ApiError } from '@/services/api'
+import { ApiError, getFullMediaUrl } from '@/services/api'
 import { ordersApi } from '@/services/endpoints'
 import { formatMoney, formatQuantity, toPersianDigits } from '@/utils/format'
 import type { Order } from '@/types'
@@ -166,7 +166,26 @@ export function OrderDetailPage() {
             از پیشنهاد هوشمند
           </Link>
         )}
+        {order.entry_mode === 'automatic' && (
+          <Badge tone="purple">{order.entry_mode_display}</Badge>
+        )}
+        {order.ocr_status && order.entry_mode === 'automatic' && (
+          <Badge tone={order.ocr_status === 'done' ? 'success' : 'warning'}>
+            {order.ocr_status_display}
+            {order.ocr_confidence > 0 && ` (${toPersianDigits(order.ocr_confidence)}٪)`}
+          </Badge>
+        )}
       </div>
+
+      {order.invoice_image_url && (
+        <Card title="تصویر فاکتور" className="mb-5">
+          <img
+            src={getFullMediaUrl(order.invoice_image_url)}
+            alt="فاکتور"
+            className="max-h-96 rounded-lg object-contain"
+          />
+        </Card>
+      )}
 
       <div className="mb-5 grid gap-4 lg:grid-cols-4">
         <Card>

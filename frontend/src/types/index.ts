@@ -6,7 +6,7 @@ export type Capability =
   | 'ledger.view' | 'ledger.add' | 'ledger.change' | 'ledger.delete'
   | 'catalog.view' | 'catalog.add' | 'catalog.change' | 'catalog.delete'
   | 'orders.view' | 'orders.add' | 'orders.change' | 'orders.delete'
-  | 'orders.confirm' | 'orders.import_sales'
+  | 'orders.confirm' | 'orders.import_sales' | 'orders.upload_invoice'
   | 'reports.view' | 'reports.profit_loss'
   | 'users.manage' | 'settings.manage' | 'activity.view'
 
@@ -437,6 +437,8 @@ export interface StockMovement {
 export type OrderType = 'sale' | 'purchase'
 export type OrderStatus = 'draft' | 'confirmed' | 'partial' | 'completed' | 'cancelled'
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid'
+export type EntryMode = 'manual' | 'automatic'
+export type OcrStatus = 'pending' | 'processing' | 'done' | 'review' | 'failed'
 
 export interface OrderItem {
   id?: number
@@ -490,6 +492,14 @@ export interface Order {
   confirmed_at: string | null
   source_suggestion: number | null
   created_at: string
+  entry_mode: EntryMode
+  entry_mode_display: string
+  invoice_image: string | null
+  invoice_image_url: string | null
+  ocr_status: OcrStatus
+  ocr_status_display: string
+  ocr_payload: Record<string, unknown>
+  ocr_confidence: number
 }
 
 export interface OrderListItem {
@@ -512,11 +522,15 @@ export interface OrderListItem {
   remaining_amount: string
   items_count: number
   created_at: string
+  entry_mode: EntryMode
+  entry_mode_display: string
 }
 
 export interface OrderSummarySide {
   count: number
   draft_count: number
+  automatic_count?: number
+  manual_count?: number
   total_amount: string
   paid_amount: string
   remaining_amount: string
@@ -529,15 +543,44 @@ export interface OrderSummary {
   cancelled_count: number
   overdue_count: number
   pending_suggestions: number
+  automatic_total?: number
+  manual_total?: number
 }
 
 export interface OrderOptions {
   order_types: Choice[]
   statuses: Choice[]
   payment_statuses: Choice[]
+  entry_modes: Choice[]
+  ocr_statuses: Choice[]
   suggestion_statuses: Choice[]
   priorities: Choice[]
   weekdays: NumericChoice[]
+}
+
+export interface ParsedInvoiceItem {
+  product_name: string
+  product_id: number | null
+  quantity: string
+  unit_price: string
+  match_score: number
+}
+
+export interface ParsedInvoice {
+  party_name: string
+  party_id: number | null
+  order_date: string
+  order_date_jalali: string
+  total_amount: string | null
+  confidence: number
+  warnings: string[]
+  items: ParsedInvoiceItem[]
+  raw_text: string
+}
+
+export interface InvoiceUploadPreview {
+  parsed: ParsedInvoice
+  requires_party: boolean
 }
 
 // ---------------------------------------------------------------- سوابق و پیشنهاد
@@ -877,6 +920,55 @@ export interface InventoryReport {
   low_stock: InventoryReportRow[]
   by_category: Array<{ category: string; value: string; count: number }>
   items: InventoryReportRow[]
+}
+
+export interface WarehouseStatsSummary {
+  total_products: number
+  total_stock_value: string
+  total_retail_value: string
+  out_of_stock_count: number
+  low_stock_count: number
+  movement_count: number
+  quantity_in: string
+  quantity_out: string
+  net_quantity: string
+  value_in: string
+  value_out: string
+  net_value: string
+}
+
+export interface WarehouseStatsReport {
+  date_from: string
+  date_to: string
+  date_from_jalali: string
+  date_to_jalali: string
+  summary: WarehouseStatsSummary
+  by_reason: Array<{
+    reason: string
+    reason_display: string
+    quantity_in: string
+    quantity_out: string
+    value_in: string
+    value_out: string
+    count: number
+  }>
+  top_movers: Array<{
+    product_id: number
+    product_name: string
+    sku: string
+    unit_display: string
+    category: string
+    quantity_in: string
+    quantity_out: string
+    current_stock: string
+  }>
+  daily: Array<{
+    date: string
+    label: string
+    quantity_in: string
+    quantity_out: string
+  }>
+  inventory: InventoryReport
 }
 
 export interface DashboardData {

@@ -239,3 +239,51 @@ def create_order_from_suggestion(suggestion, *, party=None, order_date=None, use
     suggestion.save(update_fields=['status', 'reviewed_by', 'modified_at'])
 
     return order
+
+
+@transaction.atomic
+def create_order_from_invoice(
+    *,
+    order_type: str,
+    party,
+    order_date,
+    invoice_image,
+    parsed_payload: dict,
+    ocr_confidence: int,
+    ocr_status: str,
+    items_data: list[dict],
+    user=None,
+) -> Order:
+    """ساخت پیش‌نویس سفارش از فاکتور آپلود‌شده."""
+    from .models import EntryMode, OrderItem
+
+    order = Order.objects.create(
+        order_type=order_type,
+        party=party,
+        order_date=order_date or date.today(),
+        status=OrderStatus.DRAFT,
+        entry_mode=EntryMode.AUTOMATIC,
+        invoice_image=invoice_image,
+        ocr_status=ocr_status,
+        ocr_payload=parsed_payload,
+        ocr_confidence=ocr_confidence,
+        description='ثبت خودکار از تصویر فاکتور',
+        created_by=user,
+    )
+
+    for item in items_data:
+        product_id = item.get('product')
+        if not product_id:
+            continue
+        OrderItem.objects.create(
+            order=order,
+            product_id=product_id,
+            quantity=item['quantity'],
+            unit_price=item['unit_price'],
+            unit_cost=item.get('unit_cost', item['unit_price']),
+            discount_amount=item.get('discount_amount', 0),
+            description=item.get('description', ''),
+        )
+
+    order.recalculate()
+    return order

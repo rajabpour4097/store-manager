@@ -145,6 +145,14 @@ def inventory_view(request):
     return Response(services.inventory_report())
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def warehouse_stats_view(request):
+    _require(request, 'reports.view')
+    date_from, date_to = _range(request)
+    return Response(services.warehouse_stats(date_from, date_to))
+
+
 REPORT_CATALOG = [
     {'key': 'profit_loss', 'title': 'سود و زیان', 'capability': 'reports.profit_loss',
      'description': 'صورت سود و زیان با انتخاب بازه تاریخ، شامل بهای تمام‌شده، هزینه‌ها و حاشیه سود.'},
@@ -158,6 +166,8 @@ REPORT_CATALOG = [
      'description': 'گزارش چک‌های پرداختی و دریافتی بر اساس سرسید و وضعیت.'},
     {'key': 'inventory', 'title': 'موجودی انبار', 'capability': 'reports.view',
      'description': 'ارزش موجودی، کالاهای ناموجود و زیر نقطه سفارش.'},
+    {'key': 'warehouse', 'title': 'آمار گردش انبار', 'capability': 'reports.view',
+     'description': 'ورود و خروج کالا، گردش روزانه و وضعیت موجودی.'},
 ]
 
 

@@ -15,6 +15,7 @@ import type {
   FinanceSummary,
   GenerateResult,
   InventoryReport,
+  InvoiceUploadPreview,
   LedgerEntry,
   LedgerSummary,
   Order,
@@ -39,6 +40,7 @@ import type {
   StockMovement,
   SuggestionSummary,
   User,
+  WarehouseStatsReport,
 } from '@/types'
 
 type Params = Record<string, string | number | boolean | null | undefined>
@@ -196,6 +198,8 @@ export const ordersApi = {
   cancel: (id: number, reason?: string) => api.post<Order>(`/orders/${id}/cancel/`, { reason }),
   registerPayment: (id: number, amount: number | string) =>
     api.post<Order>(`/orders/${id}/register-payment/`, { amount }),
+  uploadInvoice: (form: FormData) =>
+    api.upload<InvoiceUploadPreview | Order>('/orders/upload-invoice/', form),
 }
 
 export const suggestionsApi = {
@@ -239,6 +243,7 @@ export const reportsApi = {
   receivables: () => api.get<ReceivablesReport>('/reports/receivables/'),
   cheques: (params?: Params) => api.get<import('@/types').ChequeReport>('/reports/cheques/', params),
   inventory: () => api.get<InventoryReport>('/reports/inventory/'),
+  warehouseStats: (params?: Params) => api.get<WarehouseStatsReport>('/reports/warehouse-stats/', params),
   export: (key: string, params?: Params, fileName?: string) =>
     downloadFile(`/reports/export/${key}/`, params, fileName ?? `${key}.csv`),
 }

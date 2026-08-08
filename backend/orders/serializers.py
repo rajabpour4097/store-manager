@@ -8,10 +8,12 @@ from core.jalali import WEEKDAY_NAMES, to_jalali, to_jalali_verbose
 from parties.serializers import PartyMiniSerializer
 
 from .models import (
+    EntryMode,
     Order,
     OrderItem,
     OrderStatus,
     OrderType,
+    OcrStatus,
     PaymentStatus,
     PurchaseSuggestion,
     SalesHistory,
@@ -65,6 +67,9 @@ class OrderSerializer(serializers.ModelSerializer):
     is_editable = serializers.BooleanField(read_only=True)
     created_by_name = serializers.CharField(source='created_by.display_name', read_only=True, default='')
     confirmed_by_name = serializers.CharField(source='confirmed_by.display_name', read_only=True, default='')
+    entry_mode_display = serializers.CharField(source='get_entry_mode_display', read_only=True)
+    ocr_status_display = serializers.CharField(source='get_ocr_status_display', read_only=True)
+    invoice_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -77,6 +82,8 @@ class OrderSerializer(serializers.ModelSerializer):
             'description', 'items', 'items_count', 'is_editable', 'created_by',
             'created_by_name', 'confirmed_by', 'confirmed_by_name', 'confirmed_at',
             'source_suggestion', 'created_at',
+            'entry_mode', 'entry_mode_display', 'invoice_image', 'invoice_image_url',
+            'ocr_status', 'ocr_status_display', 'ocr_payload', 'ocr_confidence',
         ]
         read_only_fields = [
             'id', 'number', 'status', 'payment_status', 'subtotal', 'tax_amount',
@@ -89,6 +96,14 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_due_date_jalali(self, obj):
         return to_jalali(obj.due_date)
+
+    def get_invoice_image_url(self, obj):
+        if not obj.invoice_image:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.invoice_image.url)
+        return obj.invoice_image.url
 
     def validate(self, attrs):
         order_date = attrs.get('order_date') or getattr(self.instance, 'order_date', None)
@@ -140,6 +155,8 @@ class OrderListSerializer(serializers.ModelSerializer):
     due_date_jalali = serializers.SerializerMethodField()
     remaining_amount = serializers.DecimalField(max_digits=18, decimal_places=0, read_only=True)
     items_count = serializers.IntegerField(read_only=True)
+    entry_mode = serializers.CharField(read_only=True)
+    entry_mode_display = serializers.CharField(source='get_entry_mode_display', read_only=True)
 
     class Meta:
         model = Order
@@ -148,6 +165,7 @@ class OrderListSerializer(serializers.ModelSerializer):
             'order_date', 'order_date_jalali', 'due_date', 'due_date_jalali', 'status',
             'status_display', 'payment_status', 'payment_status_display', 'total_amount',
             'paid_amount', 'remaining_amount', 'items_count', 'created_at',
+            'entry_mode', 'entry_mode_display',
         ]
 
     def get_order_date_jalali(self, obj):
@@ -287,11 +305,46 @@ class SalesImportSerializer(serializers.Serializer):
         return value
 
 
+class InvoiceUploadSerializer(serializers.Serializer):
+    image = serializers.ImageField()
+    order_type = serializers.ChoiceField(choices=OrderType.choices, default=OrderType.SALE)
+    party = serializers.IntegerField(required=False, allow_null=True)
+    confirm = serializers.BooleanField(default=False)
+
+    def validate_image(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError('حجم تصویر نباید بیشتر از ۱۰ مگابایت باشد.')
+        allowed = ('image/jpeg', 'image/png', 'image/webp', 'image/gif')
+        content_type = getattr(value, 'content_type', '') or ''
+        if content_type and content_type not in allowed:
+            raise serializers.ValidationError('فقط تصاویر JPG، PNG، WEBP و GIF پذیرفته می‌شوند.')
+        return value
+
+
+class InvoiceParseResultSerializer(serializers.Serializer):
+    """نتیجه استخراج فاکتور قبل از ذخیره."""
+
+    party_name = serializers.CharField(allow_blank=True)
+    party_id = serializers.IntegerField(allow_null=True)
+    order_date = serializers.DateField()
+    order_date_jalali = serializers.SerializerMethodField()
+    total_amount = serializers.DecimalField(max_digits=18, decimal_places=0, allow_null=True)
+    confidence = serializers.IntegerField()
+    warnings = serializers.ListField(child=serializers.CharField())
+    items = serializers.ListField()
+    raw_text = serializers.CharField(allow_blank=True)
+
+    def get_order_date_jalali(self, obj):
+        return to_jalali(obj.get('order_date'))
+
+
 def order_options() -> dict:
     return {
         'order_types': [{'value': v, 'label': l} for v, l in OrderType.choices],
         'statuses': [{'value': v, 'label': l} for v, l in OrderStatus.choices],
         'payment_statuses': [{'value': v, 'label': l} for v, l in PaymentStatus.choices],
+        'entry_modes': [{'value': v, 'label': l} for v, l in EntryMode.choices],
+        'ocr_statuses': [{'value': v, 'label': l} for v, l in OcrStatus.choices],
         'suggestion_statuses': [{'value': v, 'label': l}
                                 for v, l in PurchaseSuggestion.Status.choices],
         'priorities': [{'value': v, 'label': l} for v, l in PurchaseSuggestion.Priority.choices],

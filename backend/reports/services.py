@@ -12,7 +12,7 @@ from decimal import Decimal
 from django.db.models import Count, DecimalField, F, Q, Sum, Value
 from django.db.models.functions import Coalesce
 
-from catalog.models import Product
+from catalog.models import Product, StockMovement
 from cheques.models import OPEN_STATUSES, Cheque, ChequeDirection, ChequeStatus
 from core.jalali import jalali_month_label, to_jalali
 from ledger.models import FinanceCategory, FinanceRecord, LedgerEntry
@@ -414,6 +414,123 @@ def inventory_report() -> dict:
         'low_stock': [row for row in rows if row['stock_state'] == 'low'],
         'by_category': sorted(by_category.values(), key=lambda row: row['value'], reverse=True),
         'items': sorted(rows, key=lambda row: row['stock_value'], reverse=True),
+    }
+
+
+def warehouse_stats(date_from: date | None = None, date_to: date | None = None) -> dict:
+    """آمار گردش انبار: ورود، خروج و موجودی."""
+    today = date.today()
+    date_to = date_to or today
+    date_from = date_from or (date_to - timedelta(days=29))
+
+    movements = StockMovement.objects.filter(
+        date__gte=date_from, date__lte=date_to,
+    ).select_related('product', 'product__category')
+
+    in_qty = Decimal('0')
+    out_qty = Decimal('0')
+    in_value = Decimal('0')
+    out_value = Decimal('0')
+
+    by_reason: dict[str, dict] = {}
+    by_product: dict[int, dict] = {}
+
+    for mv in movements:
+        qty = Decimal(mv.quantity)
+        value = (abs(qty) * Decimal(mv.unit_cost or 0)).quantize(Decimal('1'))
+        reason_key = mv.reason
+        reason_label = mv.get_reason_display()
+
+        entry = by_reason.setdefault(reason_key, {
+            'reason': reason_key,
+            'reason_display': reason_label,
+            'quantity_in': Decimal('0'),
+            'quantity_out': Decimal('0'),
+            'value_in': Decimal('0'),
+            'value_out': Decimal('0'),
+            'count': 0,
+        })
+        entry['count'] += 1
+
+        if qty > 0:
+            in_qty += qty
+            in_value += value
+            entry['quantity_in'] += qty
+            entry['value_in'] += value
+        else:
+            out_qty += abs(qty)
+            out_value += value
+            entry['quantity_out'] += abs(qty)
+            entry['value_out'] += value
+
+        pid = mv.product_id
+        prod_entry = by_product.setdefault(pid, {
+            'product_id': pid,
+            'product_name': mv.product.name,
+            'sku': mv.product.sku,
+            'unit_display': mv.product.get_unit_display(),
+            'category': mv.product.category.name if mv.product.category else '',
+            'quantity_in': Decimal('0'),
+            'quantity_out': Decimal('0'),
+            'current_stock': mv.product.stock_quantity,
+        })
+        if qty > 0:
+            prod_entry['quantity_in'] += qty
+        else:
+            prod_entry['quantity_out'] += abs(qty)
+
+    inventory = inventory_report()
+
+    daily: OrderedDict[str, dict] = OrderedDict()
+    cursor = date_from
+    while cursor <= date_to:
+        daily[cursor.isoformat()] = {
+            'date': cursor.isoformat(),
+            'label': to_jalali(cursor),
+            'quantity_in': Decimal('0'),
+            'quantity_out': Decimal('0'),
+        }
+        cursor += timedelta(days=1)
+
+    for mv in movements:
+        key = mv.date.isoformat()
+        if key not in daily:
+            continue
+        qty = Decimal(mv.quantity)
+        if qty > 0:
+            daily[key]['quantity_in'] += qty
+        else:
+            daily[key]['quantity_out'] += abs(qty)
+
+    top_movers = sorted(
+        by_product.values(),
+        key=lambda row: row['quantity_in'] + row['quantity_out'],
+        reverse=True,
+    )[:15]
+
+    return {
+        'date_from': date_from,
+        'date_to': date_to,
+        'date_from_jalali': to_jalali(date_from),
+        'date_to_jalali': to_jalali(date_to),
+        'summary': {
+            'total_products': inventory['total_products'],
+            'total_stock_value': inventory['total_stock_value'],
+            'total_retail_value': inventory['total_retail_value'],
+            'out_of_stock_count': len(inventory['out_of_stock']),
+            'low_stock_count': len(inventory['low_stock']),
+            'movement_count': movements.count(),
+            'quantity_in': in_qty,
+            'quantity_out': out_qty,
+            'net_quantity': in_qty - out_qty,
+            'value_in': in_value,
+            'value_out': out_value,
+            'net_value': in_value - out_value,
+        },
+        'by_reason': sorted(by_reason.values(), key=lambda row: row['count'], reverse=True),
+        'top_movers': top_movers,
+        'daily': list(daily.values()),
+        'inventory': inventory,
     }
 
 

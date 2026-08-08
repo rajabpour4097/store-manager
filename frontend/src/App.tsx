@@ -16,6 +16,8 @@ import { OrdersPage } from '@/pages/orders/OrdersPage'
 import { OrderDetailPage } from '@/pages/orders/OrderDetailPage'
 import { SuggestionsPage } from '@/pages/orders/SuggestionsPage'
 import { SalesHistoryPage } from '@/pages/orders/SalesHistoryPage'
+import { TradePage } from '@/pages/trade/TradePage'
+import { WarehouseStatsPage } from '@/pages/trade/WarehouseStatsPage'
 import { ReportsHubPage } from '@/pages/reports/ReportsHubPage'
 import { ProfitLossPage } from '@/pages/reports/ProfitLossPage'
 import { SalesReportPage } from '@/pages/reports/SalesReportPage'
@@ -106,6 +108,22 @@ export default function App() {
           }
         />
 
+        <Route
+          path="trade"
+          element={
+            <RequireCapability capability="orders.view">
+              <TradePage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="warehouse"
+          element={
+            <RequireCapability capability="reports.view">
+              <WarehouseStatsPage />
+            </RequireCapability>
+          }
+        />
         <Route
           path="products"
           element={

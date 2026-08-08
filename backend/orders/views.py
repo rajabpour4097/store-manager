@@ -16,10 +16,13 @@ from core.jalali import parse_flexible_date, to_jalali
 from parties.models import Party
 
 from .importers import ImportError_, build_sample_csv, import_sales_csv
+from .invoice_parser import InvoiceParseError, parse_invoice_image
 from .models import (
+    EntryMode,
     Order,
     OrderStatus,
     OrderType,
+    OcrStatus,
     PaymentStatus,
     PurchaseSuggestion,
     SalesHistory,
@@ -27,6 +30,7 @@ from .models import (
 )
 from .serializers import (
     GenerateSuggestionsSerializer,
+    InvoiceUploadSerializer,
     OrderCancelSerializer,
     OrderListSerializer,
     OrderPaymentSerializer,
@@ -43,6 +47,7 @@ from .services import (
     cancel_order,
     complete_order,
     confirm_order,
+    create_order_from_invoice,
     create_order_from_suggestion,
     refresh_order,
     register_payment,
@@ -53,7 +58,7 @@ from .suggestions import analyze_product, generate_suggestions
 class OrderViewSet(viewsets.ModelViewSet):
     permission_classes = [CapabilityPermission]
     capability_prefix = 'orders'
-    filterset_fields = ['order_type', 'status', 'payment_status', 'party']
+    filterset_fields = ['order_type', 'status', 'payment_status', 'party', 'entry_mode']
     search_fields = ['number', 'party__name', 'description']
     ordering_fields = ['order_date', 'total_amount', 'created_at', 'due_date']
     ordering = ['-order_date', '-id']
@@ -188,6 +193,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             return {
                 'count': side_qs.count(),
                 'draft_count': side_qs.filter(status=OrderStatus.DRAFT).count(),
+                'automatic_count': side_qs.filter(entry_mode=EntryMode.AUTOMATIC).count(),
+                'manual_count': side_qs.filter(entry_mode=EntryMode.MANUAL).count(),
                 'total_amount': total,
                 'paid_amount': paid,
                 'remaining_amount': total - paid,
@@ -202,7 +209,104 @@ class OrderViewSet(viewsets.ModelViewSet):
                 due_date__lt=date.today(), paid_amount__lt=F('total_amount')).count(),
             'pending_suggestions': PurchaseSuggestion.objects.filter(
                 status=PurchaseSuggestion.Status.PENDING).count(),
+            'automatic_total': active.filter(entry_mode=EntryMode.AUTOMATIC).count(),
+            'manual_total': active.filter(entry_mode=EntryMode.MANUAL).count(),
         })
+
+    @action(detail=False, methods=['post'], url_path='upload-invoice',
+            parser_classes=[MultiPartParser, FormParser])
+    def upload_invoice(self, request):
+        if not has_capability(request.user, 'orders.upload_invoice'):
+            raise PermissionDenied('دسترسی آپلود فاکتور را ندارید.')
+
+        serializer = InvoiceUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        uploaded = data['image']
+        order_type = data['order_type']
+        party_id = data.get('party')
+
+        try:
+            image_bytes = uploaded.read()
+            parsed = parse_invoice_image(
+                image_bytes,
+                order_type=order_type,
+                party_id=party_id,
+            )
+        except InvoiceParseError as exc:
+            return Response({'detail': str(exc)}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        parsed_items = [{
+            'product_name': item.product_name,
+            'product_id': item.product_id,
+            'quantity': str(item.quantity),
+            'unit_price': str(item.unit_price),
+            'match_score': item.match_score,
+        } for item in parsed.items]
+
+        ocr_status = OcrStatus.DONE if parsed.confidence >= 50 else OcrStatus.REVIEW
+        payload = {
+            'party_name': parsed.party_name,
+            'order_date': parsed.order_date.isoformat() if parsed.order_date else None,
+            'total_amount': str(parsed.total_amount) if parsed.total_amount else None,
+            'items': parsed_items,
+            'warnings': parsed.warnings,
+            'raw_text': parsed.raw_text[:2000],
+        }
+
+        if not data.get('confirm'):
+            return Response({
+                'parsed': {
+                    'party_name': parsed.party_name,
+                    'party_id': parsed.party_id,
+                    'order_date': parsed.order_date,
+                    'order_date_jalali': to_jalali(parsed.order_date),
+                    'total_amount': parsed.total_amount,
+                    'confidence': parsed.confidence,
+                    'warnings': parsed.warnings,
+                    'items': parsed_items,
+                    'raw_text': parsed.raw_text[:500],
+                },
+                'requires_party': parsed.party_id is None,
+            })
+
+        if not parsed.party_id and not party_id:
+            return Response(
+                {'detail': 'طرف حساب مشخص نیست. لطفاً طرف حساب را انتخاب کنید.'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        party = Party.objects.filter(pk=party_id or parsed.party_id).first()
+        if party is None:
+            return Response({'detail': 'طرف حساب یافت نشد.'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+        items_data = [
+            {
+                'product': item.product_id,
+                'quantity': item.quantity,
+                'unit_price': item.unit_price,
+            }
+            for item in parsed.items
+            if item.product_id
+        ]
+
+        uploaded.seek(0)
+        order = create_order_from_invoice(
+            order_type=order_type,
+            party=party,
+            order_date=parsed.order_date,
+            invoice_image=uploaded,
+            parsed_payload=payload,
+            ocr_confidence=parsed.confidence,
+            ocr_status=ocr_status,
+            items_data=items_data,
+            user=request.user,
+        )
+
+        log_activity(request.user, ActivityLog.Action.CREATE, 'Order', order.id,
+                     f'ثبت خودکار {order.get_order_type_display()} از فاکتور {order.number}', request)
+        return Response(OrderSerializer(order, context={'request': request}).data,
+                        status=http_status.HTTP_201_CREATED)
 
 
 class SalesHistoryViewSet(viewsets.ReadOnlyModelViewSet):
