@@ -35,8 +35,16 @@ export const searchPartiesForOrder = async (
   }))
 }
 
-export const searchProducts = async (term: string): Promise<AsyncOption[]> => {
-  const response = await catalogApi.products({ search: term, page_size: 20, is_active: true })
+export const searchProducts = async (
+  term: string,
+  options?: { excludeDefective?: boolean },
+): Promise<AsyncOption[]> => {
+  const response = await catalogApi.products({
+    search: term,
+    page_size: 20,
+    is_active: true,
+    exclude_defective: options?.excludeDefective ? true : undefined,
+  })
   return response.results.map((product) => ({
     value: product.id,
     label: product.name,
@@ -46,3 +54,7 @@ export const searchProducts = async (term: string): Promise<AsyncOption[]> => {
     )}`,
   }))
 }
+
+/** کالاهای فعال بدون خرابی باز — برای ثبت خرابی جدید */
+export const searchAvailableProducts = (term: string) =>
+  searchProducts(term, { excludeDefective: true })

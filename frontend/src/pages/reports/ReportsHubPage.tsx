@@ -6,6 +6,7 @@ import {
   Download,
   ShoppingBag,
   Store,
+  TriangleAlert,
   Users,
 } from 'lucide-react'
 
@@ -66,6 +67,14 @@ const LINKS = [
     icon: Boxes,
     capability: 'reports.view' as const,
     tone: 'from-rose-500 to-pink-500',
+  },
+  {
+    to: '/defects',
+    title: 'آمار خرابی‌ها',
+    description: 'کالاهای خراب، پیگیری و ثبت درست شدن',
+    icon: TriangleAlert,
+    capability: 'catalog.view' as const,
+    tone: 'from-orange-500 to-amber-500',
   },
 ]
 

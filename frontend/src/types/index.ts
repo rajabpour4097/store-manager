@@ -390,6 +390,31 @@ export interface Product {
   stock_value: string
   stock_state: 'ok' | 'low' | 'out_of_stock'
   stock_state_display: string
+  has_open_defect?: boolean
+  created_at: string
+}
+
+export type ProductDefectStatus = 'open' | 'repaired'
+
+export interface ProductDefect {
+  id: number
+  product: number
+  product_name: string
+  product_sku: string
+  supplier: number | null
+  supplier_name: string
+  reason: string
+  description: string
+  registered_at: string
+  registered_at_jalali: string | null
+  last_follow_up_at: string | null
+  last_follow_up_at_jalali: string | null
+  status: ProductDefectStatus
+  status_display: string
+  repaired_at: string | null
+  repaired_at_jalali: string | null
+  created_by: number | null
+  created_by_name: string
   created_at: string
 }
 

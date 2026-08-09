@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Product, ProductCategory, StockMovement
+from .models import Product, ProductCategory, ProductDefect, StockMovement
 
 
 @admin.register(ProductCategory)
@@ -25,3 +25,11 @@ class StockMovementAdmin(admin.ModelAdmin):
     list_filter = ['reason']
     search_fields = ['product__name']
     date_hierarchy = 'date'
+
+
+@admin.register(ProductDefect)
+class ProductDefectAdmin(admin.ModelAdmin):
+    list_display = ['product', 'status', 'registered_at', 'last_follow_up_at', 'repaired_at']
+    list_filter = ['status']
+    search_fields = ['product__name', 'reason', 'description']
+    date_hierarchy = 'registered_at'

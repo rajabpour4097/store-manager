@@ -28,6 +28,7 @@ import type {
   Product,
   ProductAnalysis,
   ProductCategory,
+  ProductDefect,
   ProfitLossReport,
   PurchaseReport,
   PurchaseSuggestion,
@@ -181,6 +182,14 @@ export const catalogApi = {
     api.get<Paginated<StockMovement>>('/catalog/stock-movements/', params),
   adjustStock: (payload: Record<string, unknown>) =>
     api.post<StockMovement>('/catalog/stock-movements/adjust/', payload),
+
+  defects: (params?: Params) => api.get<Paginated<ProductDefect>>('/catalog/defects/', params),
+  createDefect: (payload: Record<string, unknown>) =>
+    api.post<ProductDefect>('/catalog/defects/', payload),
+  updateDefect: (id: number, payload: Record<string, unknown>) =>
+    api.patch<ProductDefect>(`/catalog/defects/${id}/`, payload),
+  repairDefect: (id: number, payload?: Record<string, unknown>) =>
+    api.post<ProductDefect>(`/catalog/defects/${id}/repair/`, payload ?? {}),
 }
 
 // ------------------------------------------------------------------ سفارش

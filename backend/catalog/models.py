@@ -156,3 +156,37 @@ class StockMovement(BaseModel):
 
     def __str__(self):
         return f'{self.product.name} | {self.quantity} | {self.get_reason_display()}'
+
+
+class ProductDefect(BaseModel):
+    """ثبت کالای خراب تا زمان درست شدن از آمار موجودی کنار گذاشته می‌شود."""
+
+    class Status(models.TextChoices):
+        OPEN = 'open', 'خراب'
+        REPAIRED = 'repaired', 'درست شده'
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE,
+                                related_name='defects', verbose_name='کالا')
+    reason = models.TextField(verbose_name='علت خرابی')
+    description = models.TextField(blank=True, verbose_name='توضیحات')
+    registered_at = models.DateField(verbose_name='تاریخ ثبت')
+    last_follow_up_at = models.DateField(null=True, blank=True,
+                                         verbose_name='تاریخ آخرین پیگیری')
+    status = models.CharField(max_length=20, choices=Status.choices,
+                              default=Status.OPEN, verbose_name='وضعیت')
+    repaired_at = models.DateField(null=True, blank=True, verbose_name='تاریخ درست شدن')
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL,
+                                   null=True, blank=True, related_name='product_defects',
+                                   verbose_name='کاربر')
+
+    class Meta:
+        verbose_name = 'کالای خراب'
+        verbose_name_plural = 'کالاهای خراب'
+        ordering = ['-registered_at', '-id']
+        indexes = [
+            models.Index(fields=['status', 'registered_at']),
+            models.Index(fields=['product', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.product.name} | {self.get_status_display()}'

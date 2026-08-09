@@ -1,6 +1,7 @@
+from datetime import date
 from decimal import Decimal
 
-from django.db.models import Count, F, Q, Sum
+from django.db.models import Count, Exists, F, OuterRef, Q, Sum
 from rest_framework import status as http_status
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -11,15 +12,16 @@ from accounts.models import ActivityLog, log_activity
 from accounts.permissions import CapabilityPermission
 from core.jalali import parse_flexible_date
 
-from .models import Product, ProductCategory, StockMovement
+from .models import Product, ProductCategory, ProductDefect, StockMovement
 from .serializers import (
     ProductCategorySerializer,
+    ProductDefectSerializer,
     ProductSerializer,
     StockAdjustmentSerializer,
     StockMovementSerializer,
     catalog_options,
 )
-from .services import apply_movement
+from .services import apply_movement, inventory_products, open_defect_product_ids
 
 
 class ProductCategoryViewSet(viewsets.ModelViewSet):
@@ -52,7 +54,10 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering = ['name']
 
     def get_queryset(self):
-        queryset = Product.objects.select_related('category', 'default_supplier')
+        open_defect = ProductDefect.objects.filter(
+            product_id=OuterRef('pk'), status=ProductDefect.Status.OPEN)
+        queryset = Product.objects.select_related('category', 'default_supplier').annotate(
+            _has_open_defect=Exists(open_defect))
         state = self.request.query_params.get('stock_state')
         if state == 'out_of_stock':
             queryset = queryset.filter(stock_quantity__lte=0)
@@ -61,7 +66,15 @@ class ProductViewSet(viewsets.ModelViewSet):
                                        stock_quantity__lte=F('reorder_point'))
         elif state == 'ok':
             queryset = queryset.filter(stock_quantity__gt=F('reorder_point'))
+        exclude_defective = self.request.query_params.get('exclude_defective')
+        if exclude_defective in ('1', 'true', 'True'):
+            queryset = queryset.exclude(id__in=open_defect_product_ids())
         return queryset
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['open_defect_ids'] = set(open_defect_product_ids())
+        return context
 
     def perform_create(self, serializer):
         product = serializer.save()
@@ -88,7 +101,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def summary(self, request):
         queryset = Product.objects.all()
-        active = queryset.filter(is_active=True)
+        active = inventory_products()
         totals = active.aggregate(
             stock_value=Sum(F('stock_quantity') * F('purchase_price')),
             retail_value=Sum(F('stock_quantity') * F('sale_price')),
@@ -106,11 +119,11 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='low-stock')
     def low_stock(self, request):
-        queryset = Product.objects.select_related('category', 'default_supplier').filter(
-            is_active=True
-        ).filter(Q(stock_quantity__lte=F('reorder_point')) | Q(stock_quantity__lte=0)
-                 ).order_by('stock_quantity')[:50]
-        return Response(ProductSerializer(queryset, many=True).data)
+        queryset = inventory_products().select_related('category', 'default_supplier').filter(
+            Q(stock_quantity__lte=F('reorder_point')) | Q(stock_quantity__lte=0)
+        ).order_by('stock_quantity')[:50]
+        return Response(ProductSerializer(queryset, many=True,
+                                          context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=['get'])
     def movements(self, request, pk=None):
@@ -157,3 +170,65 @@ class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
         log_activity(request.user, ActivityLog.Action.CREATE, 'StockMovement', movement.id,
                      f'گردش انبار {movement.product.name}: {movement.quantity}', request)
         return Response(StockMovementSerializer(movement).data, status=http_status.HTTP_201_CREATED)
+
+
+class ProductDefectViewSet(viewsets.ModelViewSet):
+    serializer_class = ProductDefectSerializer
+    permission_classes = [CapabilityPermission]
+    capability_prefix = 'catalog'
+    filterset_fields = ['status', 'product']
+    search_fields = ['product__name', 'product__sku', 'reason', 'description',
+                     'product__default_supplier__name']
+    ordering_fields = ['registered_at', 'last_follow_up_at', 'created_at', 'status']
+    ordering = ['-registered_at', '-id']
+    http_method_names = ['get', 'post', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        return ProductDefect.objects.select_related(
+            'product', 'product__default_supplier', 'created_by')
+
+    def perform_create(self, serializer):
+        defect = serializer.save(
+            created_by=self.request.user,
+            status=ProductDefect.Status.OPEN,
+            repaired_at=None,
+        )
+        log_activity(self.request.user, ActivityLog.Action.CREATE, 'ProductDefect', defect.id,
+                     f'ثبت خرابی کالای {defect.product.name}', self.request)
+
+    def perform_update(self, serializer):
+        previous = serializer.instance.status
+        defect = serializer.save()
+        if (previous != ProductDefect.Status.REPAIRED
+                and defect.status == ProductDefect.Status.REPAIRED
+                and not defect.repaired_at):
+            defect.repaired_at = date.today()
+            defect.save(update_fields=['repaired_at', 'modified_at'])
+        elif defect.status == ProductDefect.Status.OPEN and defect.repaired_at:
+            defect.repaired_at = None
+            defect.save(update_fields=['repaired_at', 'modified_at'])
+        log_activity(self.request.user, ActivityLog.Action.UPDATE, 'ProductDefect', defect.id,
+                     f'به‌روزرسانی خرابی کالای {defect.product.name}', self.request)
+
+    @action(detail=True, methods=['post'])
+    def repair(self, request, pk=None):
+        defect = self.get_object()
+        if defect.status == ProductDefect.Status.REPAIRED:
+            raise ValidationError({'detail': 'این کالا قبلاً به‌عنوان درست‌شده ثبت شده است.'})
+        follow_up = parse_flexible_date(request.data.get('last_follow_up_at')) or date.today()
+        description = request.data.get('description')
+        reason = request.data.get('reason')
+        defect.status = ProductDefect.Status.REPAIRED
+        defect.repaired_at = parse_flexible_date(request.data.get('repaired_at')) or date.today()
+        defect.last_follow_up_at = follow_up
+        if description is not None:
+            defect.description = description
+        if reason is not None:
+            reason = str(reason).strip()
+            if not reason:
+                raise ValidationError({'reason': 'علت خرابی را وارد کنید.'})
+            defect.reason = reason
+        defect.save()
+        log_activity(request.user, ActivityLog.Action.UPDATE, 'ProductDefect', defect.id,
+                     f'درست شدن کالای {defect.product.name}', request)
+        return Response(ProductDefectSerializer(defect).data)

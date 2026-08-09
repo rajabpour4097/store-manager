@@ -5,8 +5,21 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import QuerySet
 
-from .models import Product, StockMovement
+from .models import Product, ProductDefect, StockMovement
+
+
+def open_defect_product_ids() -> QuerySet:
+    """شناسه کالاهایی که فعلاً خراب ثبت شده‌اند و نباید در آمار موجودی باشند."""
+    return ProductDefect.objects.filter(
+        status=ProductDefect.Status.OPEN,
+    ).values_list('product_id', flat=True)
+
+
+def inventory_products() -> QuerySet:
+    """کالاهای فعال بدون خرابی باز برای آمار موجودی."""
+    return Product.objects.filter(is_active=True).exclude(id__in=open_defect_product_ids())
 
 
 @transaction.atomic

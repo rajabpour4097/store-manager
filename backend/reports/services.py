@@ -13,6 +13,7 @@ from django.db.models import Count, DecimalField, F, Q, Sum, Value
 from django.db.models.functions import Coalesce
 
 from catalog.models import Product, StockMovement
+from catalog.services import inventory_products
 from cheques.models import OPEN_STATUSES, Cheque, ChequeDirection, ChequeStatus
 from core.jalali import jalali_month_label, to_jalali
 from ledger.models import FinanceCategory, FinanceRecord, LedgerEntry
@@ -378,7 +379,7 @@ def cheque_report(date_from: date, date_to: date) -> dict:
 # انبار
 # ---------------------------------------------------------------------------
 def inventory_report() -> dict:
-    products = Product.objects.filter(is_active=True).select_related('category')
+    products = inventory_products().select_related('category')
     rows = [{
         'id': product.id,
         'sku': product.sku,
@@ -573,8 +574,9 @@ def dashboard(date_from: date | None = None, date_to: date | None = None) -> dic
 
     top_products = sales_report(date_from, date_to)['by_product'][:8]
 
-    low_stock_count = Product.objects.filter(
-        is_active=True).filter(Q(stock_quantity__lte=F('reorder_point')) | Q(stock_quantity__lte=0)).count()
+    inv_products = inventory_products()
+    low_stock_count = inv_products.filter(
+        Q(stock_quantity__lte=F('reorder_point')) | Q(stock_quantity__lte=0)).count()
 
     from orders.models import PurchaseSuggestion
 
@@ -607,7 +609,7 @@ def dashboard(date_from: date | None = None, date_to: date | None = None) -> dic
         },
         'inventory': {
             'low_stock_count': low_stock_count,
-            'total_products': Product.objects.filter(is_active=True).count(),
+            'total_products': inv_products.count(),
         },
         'suggestions': {
             'pending_count': PurchaseSuggestion.objects.filter(

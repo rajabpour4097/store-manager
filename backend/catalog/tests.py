@@ -7,8 +7,8 @@ from rest_framework.test import APIClient
 from accounts.models import Role, User
 from parties.models import Party, PartyType
 
-from .models import Product, ProductCategory, StockMovement
-from .services import apply_movement, revert_movements
+from .models import Product, ProductCategory, ProductDefect, StockMovement
+from .services import apply_movement, inventory_products, revert_movements
 
 
 class ProductModelTests(TestCase):
@@ -144,3 +144,50 @@ class CatalogApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['total_products'], 1)
         self.assertEqual(response.data['out_of_stock'], 1)
+
+
+class ProductDefectApiTests(TestCase):
+    def setUp(self):
+        self.manager = User.objects.create_user(username='m', password='x', role=Role.MANAGER)
+        self.supplier = Party.objects.create(name='شرکت نمونه', party_type=PartyType.SUPPLIER)
+        self.product = Product.objects.create(
+            name='یخچال', purchase_price=1000, sale_price=1500,
+            default_supplier=self.supplier, stock_quantity=Decimal('3'),
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.manager)
+
+    def test_create_defect_and_exclude_from_inventory(self):
+        response = self.client.post('/api/catalog/defects/', {
+            'product': self.product.id,
+            'reason': 'کمپرسور خراب',
+            'description': 'نیاز به تعمیر',
+            'registered_at': str(date.today()),
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['supplier_name'], 'شرکت نمونه')
+        self.assertEqual(response.data['status'], ProductDefect.Status.OPEN)
+        self.assertFalse(inventory_products().filter(id=self.product.id).exists())
+
+        summary = self.client.get('/api/catalog/products/summary/')
+        self.assertEqual(summary.data['active_products'], 0)
+
+    def test_cannot_create_duplicate_open_defect(self):
+        ProductDefect.objects.create(
+            product=self.product, reason='خرابی', registered_at=date.today())
+        response = self.client.post('/api/catalog/defects/', {
+            'product': self.product.id,
+            'reason': 'دوباره',
+            'registered_at': str(date.today()),
+        }, format='json')
+        self.assertEqual(response.status_code, 400)
+
+    def test_repair_returns_to_inventory(self):
+        defect = ProductDefect.objects.create(
+            product=self.product, reason='خرابی', registered_at=date.today())
+        response = self.client.post(f'/api/catalog/defects/{defect.id}/repair/', {
+            'description': 'تعمیر شد',
+        }, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['status'], ProductDefect.Status.REPAIRED)
+        self.assertTrue(inventory_products().filter(id=self.product.id).exists())

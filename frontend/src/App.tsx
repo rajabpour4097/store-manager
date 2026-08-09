@@ -12,6 +12,7 @@ import { LedgerPage } from '@/pages/ledger/LedgerPage'
 import { FinancePage } from '@/pages/ledger/FinancePage'
 import { BankAccountsPage } from '@/pages/ledger/BankAccountsPage'
 import { ProductsPage } from '@/pages/catalog/ProductsPage'
+import { DefectsPage } from '@/pages/catalog/DefectsPage'
 import { OrdersPage } from '@/pages/orders/OrdersPage'
 import { OrderDetailPage } from '@/pages/orders/OrderDetailPage'
 import { SuggestionsPage } from '@/pages/orders/SuggestionsPage'
@@ -121,6 +122,14 @@ export default function App() {
           element={
             <RequireCapability capability="reports.view">
               <WarehouseStatsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="defects"
+          element={
+            <RequireCapability capability="catalog.view">
+              <DefectsPage />
             </RequireCapability>
           }
         />
