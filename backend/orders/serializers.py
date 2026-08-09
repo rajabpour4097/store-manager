@@ -7,7 +7,7 @@ from catalog.serializers import ProductMiniSerializer
 from core.jalali import WEEKDAY_NAMES, to_jalali, to_jalali_verbose
 from parties.serializers import PartyMiniSerializer
 
-from .ocr_providers import ocr_capabilities
+from .invoice_pipeline import pipeline_capabilities
 from .models import (
     EntryMode,
     Order,
@@ -351,5 +351,5 @@ def order_options() -> dict:
                                 for v, l in PurchaseSuggestion.Status.choices],
         'priorities': [{'value': v, 'label': l} for v, l in PurchaseSuggestion.Priority.choices],
         'weekdays': [{'value': index, 'label': name} for index, name in enumerate(WEEKDAY_NAMES)],
-        'ocr_capabilities': ocr_capabilities(),
+        'ocr_capabilities': pipeline_capabilities(),
     }

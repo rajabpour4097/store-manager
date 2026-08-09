@@ -17,12 +17,6 @@ import { useAuth } from '@/contexts/AuthContext'
 import { ApiError } from '@/services/api'
 import { todayJalali } from '@/utils/jalali'
 
-const DEMO_ACCOUNTS = [
-  { username: 'manager1', password: 'Manager@1234', role: 'مدیر ارشد' },
-  { username: 'manager2', password: 'Manager@2345', role: 'مدیر' },
-  { username: 'accountant', password: 'Hesab@1234', role: 'حسابدار' },
-]
-
 const FEATURES = [
   { icon: ReceiptText, title: 'چک‌های دریافتی و پرداختی', text: 'رهگیری کامل چرخه‌ی چک تا تسویه' },
   { icon: Wallet, title: 'بدهکار و بستانکار', text: 'صورتحساب و مانده‌ی لحظه‌ای طرف‌حساب‌ها' },

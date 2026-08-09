@@ -32,8 +32,58 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { ApiError } from '@/services/api'
 import { ordersApi, partiesApi, catalogApi } from '@/services/endpoints'
-import { formatCompactMoney, formatQuantity, toPersianDigits } from '@/utils/format'
-import type { InvoiceUploadPreview, Order, OrderListItem, OrderType, ParsedInvoice } from '@/types'
+import { formatCompactMoney, toPersianDigits } from '@/utils/format'
+import type { InvoiceUploadPreview, Order, OrderListItem, OrderType, ParsedInvoice, PipelineStage } from '@/types'
+
+const PIPELINE_LABELS: Record<string, string> = {
+  paddleocr: 'PaddleOCR',
+  vision_llm: 'Vision LLM',
+  validation: 'اعتبارسنجی',
+  human_confirmation: 'تأیید کاربر',
+  inventory: 'موجودی انبار',
+}
+
+const STAGE_TONE: Record<PipelineStage['status'], 'success' | 'warning' | 'danger' | 'neutral' | 'brand'> = {
+  done: 'success',
+  review: 'warning',
+  failed: 'danger',
+  skipped: 'neutral',
+  pending: 'neutral',
+  running: 'brand',
+}
+
+function PipelineSteps({ stages }: { stages: PipelineStage[] }) {
+  if (!stages.length) return null
+  return (
+    <div className="mb-4 flex flex-wrap gap-2">
+      {stages.map((stage) => (
+        <div
+          key={stage.name}
+          className="flex min-w-[120px] flex-1 flex-col rounded-lg border border-ink-200 bg-white px-3 py-2 dark:border-ink-700 dark:bg-ink-900"
+          title={stage.detail}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-ink-700 dark:text-ink-200">
+              {PIPELINE_LABELS[stage.name] ?? stage.label}
+            </span>
+            <Badge tone={STAGE_TONE[stage.status] ?? 'neutral'}>
+              {stage.status === 'done'
+                ? '✓'
+                : stage.status === 'review'
+                  ? '!'
+                  : stage.status === 'failed'
+                    ? '✗'
+                    : '…'}
+            </Badge>
+          </div>
+          {stage.detail && (
+            <span className="mt-1 line-clamp-2 text-[10px] text-ink-400">{stage.detail}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 type TradeTab = 'manual' | 'automatic'
 
@@ -441,21 +491,18 @@ export function TradePage() {
         <Card className="mb-5" bodyClassName="!py-5">
           {options?.ocr_capabilities && !options.ocr_capabilities.configured && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-              <p className="font-semibold">موتور OCR فعال نیست</p>
-              <p className="mt-1">
-                برای شناسایی خودکار فاکتور، یکی از این دو را راه‌اندازی کنید:
+              <p className="font-semibold">خط لوله OCR فعال نیست</p>
+              <p className="mt-1 font-mono text-xs">
+                PaddleOCR → Vision LLM → Validation → Human → Inventory
               </p>
               <ul className="mt-2 list-inside list-disc space-y-1">
                 <li>
-                  <strong>OpenAI Vision (پیشنهادی):</strong> کلید API را در فایل{' '}
-                  <code className="rounded bg-amber-100 px-1">.env</code> قرار دهید:{' '}
-                  <code className="rounded bg-amber-100 px-1">OPENAI_API_KEY=sk-...</code>
+                  <strong>PaddleOCR:</strong>{' '}
+                  <code className="rounded bg-amber-100 px-1">pip install paddlepaddle paddleocr</code>
                 </li>
                 <li>
-                  <strong>Tesseract (محلی):</strong>{' '}
-                  <code className="rounded bg-amber-100 px-1">
-                    sudo apt install tesseract-ocr tesseract-ocr-fas
-                  </code>
+                  <strong>Vision LLM:</strong> در <code className="rounded bg-amber-100 px-1">.env</code>{' '}
+                  → <code className="rounded bg-amber-100 px-1">OPENAI_API_KEY=sk-...</code>
                 </li>
               </ul>
             </div>
@@ -467,7 +514,7 @@ export function TradePage() {
                 آپلود تصویر فاکتور
               </h3>
               <p className="mb-4 text-sm text-ink-500">
-                عکس فاکتور خرید یا فروش را آپلود کنید. سیستم اطلاعات را استخراج کرده و پس از بررسی شما ثبت می‌کند.
+                خط لوله: PaddleOCR → Vision LLM → اعتبارسنجی → تأیید شما → موجودی انبار
               </p>
 
               <div className="mb-4 grid gap-3 sm:grid-cols-2">
@@ -534,7 +581,9 @@ export function TradePage() {
                 <div className="flex flex-wrap gap-2">
                   {preview.ocr_engine && (
                     <Badge tone="brand">
-                      موتور: {preview.ocr_engine === 'openai' ? 'OpenAI Vision' : preview.ocr_engine}
+                      {preview.ocr_engine.includes('vision')
+                        ? 'PaddleOCR + Vision LLM'
+                        : preview.ocr_engine}
                     </Badge>
                   )}
                   <Badge tone={preview.confidence >= 50 ? 'success' : 'warning'}>
@@ -542,6 +591,10 @@ export function TradePage() {
                   </Badge>
                 </div>
               </div>
+
+              {preview.pipeline && preview.pipeline.length > 0 && (
+                <PipelineSteps stages={preview.pipeline} />
+              )}
 
               {preview.warnings.length > 0 && (
                 <ul className="mb-3 space-y-1 text-sm text-amber-700 dark:text-amber-300">
@@ -575,10 +628,10 @@ export function TradePage() {
                 </div>
               </div>
 
-              {preview && preview.ocr_engine === 'tesseract' && preview.confidence < 60 && (
+              {preview && !options?.ocr_capabilities?.vision_llm && (
                 <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
-                  Tesseract برای این نوع فاکتور دقیق نیست. ردیف‌ها را ویرایش کنید یا{' '}
-                  <strong>OPENAI_API_KEY</strong> را در سرور تنظیم کنید.
+                  مرحله Vision LLM فعال نیست — دقت پایین خواهد بود. OPENAI_API_KEY را در سرور تنظیم
+                  کنید یا ردیف‌ها را دستی ویرایش کنید.
                 </div>
               )}
 

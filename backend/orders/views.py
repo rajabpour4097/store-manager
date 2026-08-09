@@ -16,6 +16,7 @@ from core.jalali import parse_flexible_date, to_jalali
 from parties.models import Party
 
 from .importers import ImportError_, build_sample_csv, import_sales_csv
+from .invoice_pipeline import pipeline_capabilities
 from .ocr_providers import ocr_capabilities
 from .invoice_parser import InvoiceParseError, build_items_from_client, parse_invoice_image
 from .models import (
@@ -259,6 +260,10 @@ class OrderViewSet(viewsets.ModelViewSet):
             'ocr_engine': parsed.ocr_engine,
         }
 
+        pipeline_stages = []
+        if hasattr(parsed, 'pipeline_trace') and parsed.pipeline_trace:
+            pipeline_stages = parsed.pipeline_trace.to_dict()
+
         if not data.get('confirm'):
             return Response({
                 'parsed': {
@@ -274,9 +279,10 @@ class OrderViewSet(viewsets.ModelViewSet):
                     'raw_text': parsed.raw_text[:500],
                     'ocr_engine': parsed.ocr_engine,
                     'ocr_error': parsed.ocr_error,
+                    'pipeline': pipeline_stages,
                 },
                 'requires_party': parsed.party_id is None,
-                'ocr_capabilities': ocr_capabilities(),
+                'ocr_capabilities': pipeline_capabilities(),
             })
 
         # ردیف‌های ویرایش‌شده توسط کاربر (اولویت بر OCR مجدد)
@@ -333,8 +339,15 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         log_activity(request.user, ActivityLog.Action.CREATE, 'Order', order.id,
                      f'ثبت خودکار {order.get_order_type_display()} از فاکتور {order.number}', request)
-        return Response(OrderSerializer(order, context={'request': request}).data,
-                        status=http_status.HTTP_201_CREATED)
+
+        # مرحله inventory: پس از confirm_order موجودی به‌روز می‌شود
+        order_data = OrderSerializer(order, context={'request': request}).data
+        order_data['pipeline'] = [
+            {'name': 'human_confirmation', 'label': 'تأیید کاربر', 'status': 'done', 'detail': 'پیش‌نویس ثبت شد'},
+            {'name': 'inventory', 'label': 'موجودی انبار', 'status': 'pending',
+             'detail': 'پس از تأیید سفارش، موجودی به‌روز می‌شود'},
+        ]
+        return Response(order_data, status=http_status.HTTP_201_CREATED)
 
 
 class SalesHistoryViewSet(viewsets.ReadOnlyModelViewSet):

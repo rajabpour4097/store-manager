@@ -470,25 +470,13 @@ def parse_invoice_image(
     order_type: str = 'sale',
     party_id: int | None = None,
 ) -> ParsedInvoice:
-    """تحلیل تصویر فاکتور و برگرداندن داده‌های ساخت‌یافته."""
-    ocr = run_ocr(image_bytes)
+    """تحلیل تصویر فاکتور — خط لوله PaddleOCR → Vision LLM → Validation."""
+    from .invoice_pipeline import run_invoice_pipeline
 
-    if ocr.structured:
-        result = _parse_from_structured(ocr.structured)
-        result.raw_text = ocr.raw_text
-    else:
-        result = ParsedInvoice(order_date=date.today())
-        result.raw_text = _normalize_persian(ocr.raw_text)
-        if result.raw_text:
-            result.order_date = _parse_date_from_text(result.raw_text) or date.today()
-            result.party_name = _extract_party_name(result.raw_text)
-            result.invoice_number = _extract_invoice_number(result.raw_text)
-            result.items = _parse_line_items_from_text(result.raw_text)
-            total_match = re.search(
-                r'(?:جمع\s*کل|جمع|total)\s*[:\-]?\s*([\d,]+)',
-                result.raw_text, re.IGNORECASE,
-            )
-            if total_match:
-                result.total_amount = _parse_amount(total_match.group(1))
-
-    return _finalize_result(result, order_type=order_type, party_id=party_id, ocr=ocr)
+    invoice, trace = run_invoice_pipeline(
+        image_bytes,
+        order_type=order_type,
+        party_id=party_id,
+    )
+    invoice.pipeline_trace = trace  # type: ignore[attr-defined]
+    return invoice

@@ -547,12 +547,22 @@ export interface OrderSummary {
   manual_total?: number
 }
 
+export interface PipelineStage {
+  name: string
+  label: string
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'review'
+  detail: string
+}
+
 export interface OcrCapabilities {
+  pipeline?: string
+  paddleocr?: boolean
+  vision_llm?: boolean
   engines: string[]
   recommended: string | null
   configured: boolean
-  openai: boolean
-  tesseract: boolean
+  openai?: boolean
+  tesseract?: boolean
 }
 
 export interface OrderOptions {
@@ -590,6 +600,7 @@ export interface ParsedInvoice {
   raw_text: string
   ocr_engine?: string
   ocr_error?: string
+  pipeline?: PipelineStage[]
 }
 
 export interface InvoiceUploadPreview {

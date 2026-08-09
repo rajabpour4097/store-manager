@@ -6,4 +6,6 @@ django-filter==24.2
 Pillow==10.4.0
 python-dotenv==1.0.1
 jdatetime==5.0.0
-pytesseract==0.3.13
+# OCR pipeline (optional — heavy; install on server for Persian invoices)
+# paddlepaddle>=2.6.0
+# paddleocr>=2.7.0
