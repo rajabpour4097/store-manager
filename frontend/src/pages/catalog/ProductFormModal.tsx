@@ -39,7 +39,7 @@ export function ProductFormModal({
     name: '',
     barcode: '',
     category: '',
-    unit: 'count',
+    unit: 'piece',
     purchase_price: '',
     sale_price: '',
     reorder_point: '0',
@@ -58,7 +58,7 @@ export function ProductFormModal({
       name: product?.name ?? defaultName ?? '',
       barcode: product?.barcode ?? '',
       category: product?.category ? String(product.category) : '',
-      unit: product?.unit ?? units[0]?.value ?? 'count',
+      unit: product?.unit ?? units[0]?.value ?? 'piece',
       purchase_price: product
         ? String(toNumber(product.purchase_price))
         : (defaultPurchasePrice ?? ''),
