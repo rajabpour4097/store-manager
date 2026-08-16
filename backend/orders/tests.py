@@ -304,6 +304,38 @@ class OrderSerialTests(TestCase):
         self.assertEqual(response.data['results'][0]['serial_number'], 'ZX-99')
         self.assertEqual(response.data['results'][0]['product_name'], self.product.name)
 
+    def test_draft_purchase_serial_is_searchable_for_sale(self):
+        client = APIClient()
+        client.force_authenticate(self.manager)
+        created = client.post('/api/orders/', {
+            'order_type': OrderType.PURCHASE,
+            'party': self.supplier.id,
+            'order_date': str(self.today),
+            'items': [{'product': self.product.id, 'quantity': '1', 'unit_price': 1000,
+                       'serial_number': 'SN-FIND-1'}],
+        }, format='json')
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.data['status'], OrderStatus.DRAFT)
+
+        response = client.get('/api/catalog/serials/', {
+            'search': 'SN-FIND', 'status': 'in_stock',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['serial_number'], 'SN-FIND-1')
+        self.assertEqual(response.data['results'][0]['product'], self.product.id)
+
+    def test_existing_purchase_item_serial_is_backfilled_on_search(self):
+        self._purchase('SN-OLD-9', confirm=False)
+        client = APIClient()
+        client.force_authenticate(self.manager)
+        response = client.get('/api/catalog/serials/', {
+            'search': 'SN-OLD-9', 'status': 'in_stock',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['product_name'], self.product.name)
+
     def test_purchase_without_serial_is_allowed(self):
         client = APIClient()
         client.force_authenticate(self.manager)

@@ -14,7 +14,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { ApiError } from '@/services/api'
 import { catalogApi, ordersApi, partiesApi } from '@/services/endpoints'
-import { formatMoney, toNumber } from '@/utils/format'
+import { formatMoney, toLatinDigits, toNumber } from '@/utils/format'
 import { todayIso } from '@/utils/jalali'
 import type { OrderType } from '@/types'
 
@@ -226,7 +226,7 @@ export function OrderFormModal({
           quantity: '1',
           unit_price: item.unit_price || '0',
           discount_amount: item.discount_amount || '0',
-          serial_number: item.serial.trim(),
+          serial_number: toLatinDigits(item.serial).trim(),
         })),
       })
       toast.success('سفارش ثبت شد.')

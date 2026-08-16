@@ -22,7 +22,13 @@ from .serializers import (
     StockMovementSerializer,
     catalog_options,
 )
-from .services import apply_movement, inventory_products, open_defect_product_ids
+from .services import (
+    apply_movement,
+    backfill_serials_from_purchases,
+    inventory_products,
+    normalize_serial,
+    open_defect_product_ids,
+)
 
 
 class ProductCategoryViewSet(viewsets.ModelViewSet):
@@ -240,9 +246,17 @@ class ProductSerialViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [CapabilityPermission]
     capability_prefix = 'catalog'
     filterset_fields = ['product', 'status']
-    search_fields = ['serial_number', 'product__name', 'product__sku']
     ordering_fields = ['serial_number', 'created_at']
     ordering = ['serial_number']
 
     def get_queryset(self):
-        return ProductSerial.objects.select_related('product')
+        backfill_serials_from_purchases()
+        queryset = ProductSerial.objects.select_related('product')
+        term = normalize_serial(self.request.query_params.get('search') or '')
+        if term:
+            queryset = queryset.filter(
+                Q(serial_number__icontains=term)
+                | Q(product__name__icontains=term)
+                | Q(product__sku__icontains=term)
+            )
+        return queryset

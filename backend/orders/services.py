@@ -81,10 +81,17 @@ def validate_item_serials(order_type: str, items, *, exclude_order_id: int | Non
 
 
 def sync_order_serials(order: Order) -> None:
-    """سریال‌های سفارش را با وضعیت فعلی همگام می‌کند."""
+    """سریال‌های سفارش را با وضعیت فعلی همگام می‌کند.
+
+    سریال خرید حتی در پیش‌نویس وارد انبار قابل‌فروش می‌شود تا در فروش قابل جست‌وجو باشد.
+    خروج سریال فروش فقط پس از تأیید انجام می‌شود.
+    """
     revert_order_serials(order_type=order.order_type, order_id=order.id)
-    if not order.affects_stock or order.status in (OrderStatus.DRAFT, OrderStatus.CANCELLED):
+    if order.status == OrderStatus.CANCELLED:
         return
+    if order.order_type == OrderType.SALE:
+        if not order.affects_stock or order.status == OrderStatus.DRAFT:
+            return
     apply_order_serials(order)
 
 
@@ -206,8 +213,9 @@ def confirm_order(order: Order, user=None) -> Order:
     if order.order_type == OrderType.SALE and order.affects_stock:
         shortages = [
             f'{item.product.name} (موجودی {item.product.stock_quantity}، نیاز {item.quantity})'
-            for item in order.items.select_related('product')
-            if Decimal(item.product.stock_quantity) < Decimal(item.quantity)
+            for item in items
+            if not normalize_serial(item.serial_number)
+            and Decimal(item.product.stock_quantity) < Decimal(item.quantity)
         ]
         if shortages:
             raise OrderError('موجودی کافی نیست: ' + '، '.join(shortages))

@@ -1,5 +1,5 @@
 import { catalogApi, partiesApi } from '@/services/endpoints'
-import { formatQuantity } from '@/utils/format'
+import { formatQuantity, toLatinDigits } from '@/utils/format'
 import type { OrderType } from '@/types'
 import type { AsyncOption } from './AsyncSelect'
 
@@ -65,7 +65,7 @@ export const searchSerials = async (
   options?: { productId?: number | null },
 ): Promise<AsyncOption[]> => {
   const response = await catalogApi.serials({
-    search: term,
+    search: toLatinDigits(term).trim(),
     page_size: 20,
     status: 'in_stock',
     product: options?.productId ?? undefined,

@@ -7,6 +7,8 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import QuerySet
 
+from core.jalali import normalize_digits
+
 from .models import Product, ProductDefect, ProductSerial, StockMovement
 
 
@@ -72,7 +74,7 @@ def revert_movements(*, source_type: str, source_id: int, user=None) -> int:
 
 
 def normalize_serial(value: str | None) -> str:
-    return (value or '').strip()
+    return normalize_digits((value or '')).strip()
 
 
 def find_serial(serial_number: str) -> ProductSerial | None:
@@ -85,7 +87,10 @@ def find_serial(serial_number: str) -> ProductSerial | None:
 def revert_order_serials(*, order_type: str, order_id: int) -> None:
     """اثر سریال‌های یک سفارش را برمی‌گرداند."""
     if order_type == 'purchase':
-        ProductSerial.objects.filter(purchase_order_id=order_id).delete()
+        ProductSerial.objects.filter(
+            purchase_order_id=order_id,
+            status=ProductSerial.Status.IN_STOCK,
+        ).delete()
         return
     ProductSerial.objects.filter(sale_order_id=order_id).update(
         status=ProductSerial.Status.IN_STOCK,
@@ -94,7 +99,7 @@ def revert_order_serials(*, order_type: str, order_id: int) -> None:
 
 
 def apply_order_serials(order) -> None:
-    """ثبت یا خروج سریال‌های اقلام سفارش تأییدشده."""
+    """ثبت یا خروج سریال‌های اقلام سفارش."""
     is_sale = order.order_type == 'sale'
     for item in order.items.select_related('product'):
         serial = normalize_serial(item.serial_number)
@@ -111,10 +116,36 @@ def apply_order_serials(order) -> None:
             locked.status = ProductSerial.Status.SOLD
             locked.sale_order_id = order.id
             locked.save(update_fields=['status', 'sale_order_id', 'modified_at'])
-        else:
+            continue
+        if find_serial(serial) is None:
             ProductSerial.objects.create(
                 product=item.product,
                 serial_number=serial,
                 status=ProductSerial.Status.IN_STOCK,
                 purchase_order_id=order.id,
             )
+
+
+def backfill_serials_from_purchases() -> int:
+    """سریال خریدهای ثبت‌شده‌ای که هنوز در انبار نیستند را وارد می‌کند."""
+    from orders.models import OrderItem, OrderStatus, OrderType
+
+    created = 0
+    items = (
+        OrderItem.objects.filter(order__order_type=OrderType.PURCHASE)
+        .exclude(order__status=OrderStatus.CANCELLED)
+        .exclude(serial_number='')
+        .select_related('product')
+    )
+    for item in items:
+        serial = normalize_serial(item.serial_number)
+        if not serial or find_serial(serial):
+            continue
+        ProductSerial.objects.create(
+            product=item.product,
+            serial_number=serial,
+            status=ProductSerial.Status.IN_STOCK,
+            purchase_order_id=item.order_id,
+        )
+        created += 1
+    return created

@@ -149,6 +149,8 @@ class OrderSerializer(serializers.ModelSerializer):
         order = Order.objects.create(**validated_data)
         self._apply_items(order, items_data)
         order.recalculate()
+        from .services import sync_order_serials
+        sync_order_serials(order)
         return order
 
     def update(self, instance, validated_data):
