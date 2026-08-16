@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models.functions import Lower
 
 from core.models import BaseModel
 
@@ -190,3 +191,45 @@ class ProductDefect(BaseModel):
 
     def __str__(self):
         return f'{self.product.name} | {self.get_status_display()}'
+
+
+class ProductSerial(BaseModel):
+    """یک دستگاه فیزیکی با سریال یکتا؛ آمار موجودی همچنان روی کالای والد است."""
+
+    class Status(models.TextChoices):
+        IN_STOCK = 'in_stock', 'موجود'
+        SOLD = 'sold', 'فروخته‌شده'
+
+    product = models.ForeignKey(Product, on_delete=models.PROTECT,
+                                related_name='serials', verbose_name='کالا')
+    serial_number = models.CharField(max_length=80, verbose_name='شماره سریال')
+    status = models.CharField(max_length=15, choices=Status.choices,
+                              default=Status.IN_STOCK, verbose_name='وضعیت')
+    purchase_order_id = models.PositiveIntegerField(null=True, blank=True,
+                                                    verbose_name='سفارش خرید')
+    sale_order_id = models.PositiveIntegerField(null=True, blank=True,
+                                                verbose_name='سفارش فروش')
+
+    class Meta:
+        verbose_name = 'سریال کالا'
+        verbose_name_plural = 'سریال‌های کالا'
+        ordering = ['-id']
+        constraints = [
+            models.UniqueConstraint(
+                Lower('serial_number'),
+                name='catalog_productserial_serial_ci_uniq',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['serial_number']),
+            models.Index(fields=['product', 'status']),
+            models.Index(fields=['purchase_order_id']),
+            models.Index(fields=['sale_order_id']),
+        ]
+
+    def __str__(self):
+        return f'{self.serial_number} · {self.product.name}'
+
+    def save(self, *args, **kwargs):
+        self.serial_number = (self.serial_number or '').strip()
+        super().save(*args, **kwargs)

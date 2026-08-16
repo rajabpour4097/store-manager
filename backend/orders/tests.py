@@ -170,6 +170,167 @@ class OrderWorkflowTests(TestCase):
         self.assertEqual(order.gross_profit, Decimal('5000'))
 
 
+class OrderSerialTests(TestCase):
+    def setUp(self):
+        self.manager = User.objects.create_user(username='m', password='x', role=Role.MANAGER)
+        self.customer = Party.objects.create(name='مشتری', party_type=PartyType.CUSTOMER)
+        self.supplier = Party.objects.create(name='تأمین‌کننده', party_type=PartyType.SUPPLIER)
+        self.product = Product.objects.create(name='تلویزیون سونیا ۴۳',
+                                              purchase_price=10_000_000,
+                                              sale_price=12_000_000)
+        self.today = date.today()
+
+    def _purchase(self, serial: str, *, confirm=True):
+        order = Order.objects.create(
+            order_type=OrderType.PURCHASE, party=self.supplier,
+            order_date=self.today, created_by=self.manager)
+        OrderItem.objects.create(
+            order=order, product=self.product, quantity=Decimal('5'),
+            unit_price=10_000_000, unit_cost=10_000_000, serial_number=serial)
+        order.recalculate()
+        if confirm:
+            confirm_order(order, user=self.manager)
+        return order
+
+    def test_purchase_serial_forces_quantity_one_and_creates_unit(self):
+        from catalog.models import ProductSerial
+
+        order = self._purchase('SN-TV-001')
+        item = order.items.get()
+        self.assertEqual(item.quantity, Decimal('1'))
+        self.assertEqual(item.serial_number, 'SN-TV-001')
+
+        unit = ProductSerial.objects.get(serial_number='SN-TV-001')
+        self.assertEqual(unit.product_id, self.product.id)
+        self.assertEqual(unit.status, ProductSerial.Status.IN_STOCK)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, Decimal('1.00'))
+
+    def test_stock_is_aggregated_by_product_not_serial(self):
+        from catalog.models import ProductSerial
+
+        self._purchase('AAA-1')
+        self._purchase('AAA-2')
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, Decimal('2.00'))
+        self.assertEqual(ProductSerial.objects.filter(product=self.product).count(), 2)
+
+    def test_duplicate_serial_on_purchase_is_rejected(self):
+        self._purchase('DUP-1')
+        with self.assertRaises(OrderError) as ctx:
+            self._purchase('DUP-1')
+        self.assertIn('قبلاً', str(ctx.exception))
+
+    def test_sale_by_serial_marks_unit_sold_and_reduces_model_stock(self):
+        from catalog.models import ProductSerial
+
+        self._purchase('SN-SALE-1')
+        sale = Order.objects.create(
+            order_type=OrderType.SALE, party=self.customer,
+            order_date=self.today, created_by=self.manager)
+        OrderItem.objects.create(
+            order=sale, product=self.product, quantity=Decimal('1'),
+            unit_price=12_000_000, unit_cost=10_000_000, serial_number='SN-SALE-1')
+        confirm_order(sale, user=self.manager)
+
+        unit = ProductSerial.objects.get(serial_number='SN-SALE-1')
+        self.assertEqual(unit.status, ProductSerial.Status.SOLD)
+        self.assertEqual(unit.sale_order_id, sale.id)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, Decimal('0.00'))
+
+    def test_sale_of_unknown_serial_is_rejected(self):
+        sale = Order.objects.create(
+            order_type=OrderType.SALE, party=self.customer,
+            order_date=self.today, created_by=self.manager)
+        OrderItem.objects.create(
+            order=sale, product=self.product, quantity=Decimal('1'),
+            unit_price=12_000_000, serial_number='MISSING')
+        with self.assertRaises(OrderError) as ctx:
+            confirm_order(sale, user=self.manager)
+        self.assertIn('یافت نشد', str(ctx.exception))
+
+    def test_cancel_sale_returns_serial_to_stock(self):
+        from catalog.models import ProductSerial
+
+        self._purchase('SN-BACK')
+        sale = Order.objects.create(
+            order_type=OrderType.SALE, party=self.customer,
+            order_date=self.today, created_by=self.manager)
+        OrderItem.objects.create(
+            order=sale, product=self.product, quantity=Decimal('1'),
+            unit_price=12_000_000, unit_cost=10_000_000, serial_number='SN-BACK')
+        confirm_order(sale, user=self.manager)
+        cancel_order(sale, user=self.manager)
+
+        unit = ProductSerial.objects.get(serial_number='SN-BACK')
+        self.assertEqual(unit.status, ProductSerial.Status.IN_STOCK)
+        self.assertIsNone(unit.sale_order_id)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, Decimal('1.00'))
+
+    def test_cancel_purchase_removes_serial(self):
+        from catalog.models import ProductSerial
+
+        order = self._purchase('SN-DEL')
+        cancel_order(order, user=self.manager)
+        self.assertFalse(ProductSerial.objects.filter(serial_number='SN-DEL').exists())
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, Decimal('0.00'))
+
+    def test_api_rejects_duplicate_serials_in_same_order(self):
+        client = APIClient()
+        client.force_authenticate(self.manager)
+        response = client.post('/api/orders/', {
+            'order_type': OrderType.PURCHASE,
+            'party': self.supplier.id,
+            'order_date': str(self.today),
+            'items': [
+                {'product': self.product.id, 'quantity': '1', 'unit_price': 1000,
+                 'serial_number': 'SAME-1'},
+                {'product': self.product.id, 'quantity': '1', 'unit_price': 1000,
+                 'serial_number': 'same-1'},
+            ],
+        }, format='json')
+        self.assertEqual(response.status_code, 400)
+
+    def test_serial_search_lists_in_stock_units(self):
+        self._purchase('ZX-99')
+        client = APIClient()
+        client.force_authenticate(self.manager)
+        response = client.get('/api/catalog/serials/', {'search': 'ZX', 'status': 'in_stock'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['serial_number'], 'ZX-99')
+        self.assertEqual(response.data['results'][0]['product_name'], self.product.name)
+
+    def test_purchase_without_serial_is_allowed(self):
+        client = APIClient()
+        client.force_authenticate(self.manager)
+        response = client.post('/api/orders/', {
+            'order_type': OrderType.PURCHASE,
+            'party': self.supplier.id,
+            'order_date': str(self.today),
+            'items': [{'product': self.product.id, 'quantity': '4', 'unit_price': 1000}],
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['items'][0]['serial_number'], '')
+        self.assertEqual(response.data['items'][0]['quantity'], '4.00')
+
+    def test_duplicate_serial_on_another_draft_purchase_is_rejected(self):
+        self._purchase('DRAFT-DUP', confirm=False)
+        client = APIClient()
+        client.force_authenticate(self.manager)
+        response = client.post('/api/orders/', {
+            'order_type': OrderType.PURCHASE,
+            'party': self.supplier.id,
+            'order_date': str(self.today),
+            'items': [{'product': self.product.id, 'quantity': '1', 'unit_price': 1000,
+                       'serial_number': 'DRAFT-DUP'}],
+        }, format='json')
+        self.assertEqual(response.status_code, 400)
+
+
 class OrderApiTests(TestCase):
     def setUp(self):
         self.manager = User.objects.create_user(username='m', password='x', role=Role.MANAGER)

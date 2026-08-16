@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from catalog.models import Product
 from catalog.serializers import ProductMiniSerializer
+from catalog.services import normalize_serial
 from core.jalali import WEEKDAY_NAMES, to_jalali, to_jalali_verbose
 from parties.serializers import PartyMiniSerializer
 
@@ -33,7 +34,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
         model = OrderItem
         fields = [
             'id', 'product', 'product_detail', 'product_name', 'unit_display', 'quantity',
-            'unit_price', 'unit_cost', 'discount_amount', 'description',
+            'unit_price', 'unit_cost', 'discount_amount', 'serial_number', 'description',
             'total_price', 'total_cost',
         ]
         read_only_fields = ['id']
@@ -43,10 +44,17 @@ class OrderItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('مقدار باید بزرگ‌تر از صفر باشد.')
         return value
 
+    def validate_serial_number(self, value):
+        return normalize_serial(value)
+
     def validate(self, attrs):
         discount = attrs.get('discount_amount') or Decimal('0')
         quantity = attrs.get('quantity') or Decimal('0')
         unit_price = attrs.get('unit_price') or Decimal('0')
+        serial = attrs.get('serial_number') or ''
+        if serial:
+            attrs['quantity'] = Decimal('1')
+            quantity = Decimal('1')
         if discount > quantity * unit_price:
             raise serializers.ValidationError(
                 {'discount_amount': 'تخفیف ردیف از مبلغ ردیف بیشتر است.'}
@@ -116,6 +124,19 @@ class OrderSerializer(serializers.ModelSerializer):
         tax_percent = attrs.get('tax_percent')
         if tax_percent is not None and (tax_percent < 0 or tax_percent > 100):
             raise serializers.ValidationError({'tax_percent': 'درصد مالیات باید بین ۰ و ۱۰۰ باشد.'})
+        items = attrs.get('items')
+        if items:
+            from .services import OrderError, validate_item_serials
+            order_type = attrs.get('order_type') or getattr(self.instance, 'order_type', None)
+            if order_type:
+                try:
+                    validate_item_serials(
+                        order_type,
+                        items,
+                        exclude_order_id=self.instance.pk if self.instance else None,
+                    )
+                except OrderError as exc:
+                    raise serializers.ValidationError({'items': str(exc)}) from exc
         return attrs
 
     def _apply_items(self, order, items_data):

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Product, ProductCategory, ProductDefect, StockMovement
+from .models import Product, ProductCategory, ProductDefect, ProductSerial, StockMovement
 
 
 @admin.register(ProductCategory)
@@ -33,3 +33,11 @@ class ProductDefectAdmin(admin.ModelAdmin):
     list_filter = ['status']
     search_fields = ['product__name', 'reason', 'description']
     date_hierarchy = 'registered_at'
+
+
+@admin.register(ProductSerial)
+class ProductSerialAdmin(admin.ModelAdmin):
+    list_display = ['serial_number', 'product', 'status', 'purchase_order_id', 'sale_order_id']
+    list_filter = ['status']
+    search_fields = ['serial_number', 'product__name', 'product__sku']
+    autocomplete_fields = ['product']

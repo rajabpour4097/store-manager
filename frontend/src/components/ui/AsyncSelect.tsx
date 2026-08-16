@@ -9,6 +9,7 @@ export interface AsyncOption {
   value: number
   label: string
   description?: string
+  meta?: Record<string, unknown>
 }
 
 interface AsyncSelectProps {

@@ -29,6 +29,7 @@ import type {
   ProductAnalysis,
   ProductCategory,
   ProductDefect,
+  ProductSerial,
   ProfitLossReport,
   PurchaseReport,
   PurchaseSuggestion,
@@ -169,6 +170,7 @@ export const catalogApi = {
   summary: () => api.get<CatalogSummary>('/catalog/products/summary/'),
   lowStock: () => api.get<Product[]>('/catalog/products/low-stock/'),
   productMovements: (id: number) => api.get<StockMovement[]>(`/catalog/products/${id}/movements/`),
+  serials: (params?: Params) => api.get<Paginated<ProductSerial>>('/catalog/serials/', params),
 
   categories: (params?: Params) =>
     api.get<Paginated<ProductCategory>>('/catalog/categories/', params),

@@ -219,6 +219,7 @@ export function OrderDetailPage() {
           <thead className="bg-ink-50 text-ink-500 dark:bg-ink-800/60">
             <tr>
               <th className="px-4 py-3 text-right font-medium">کالا</th>
+              <th className="px-4 py-3 text-right font-medium">سریال</th>
               <th className="px-4 py-3 text-right font-medium">تعداد</th>
               <th className="px-4 py-3 text-right font-medium">فی</th>
               <th className="px-4 py-3 text-right font-medium">تخفیف</th>
@@ -233,6 +234,15 @@ export function OrderDetailPage() {
                   <span className="mt-0.5 block text-xs text-ink-400">
                     {item.unit_display ?? item.product_detail?.unit_display}
                   </span>
+                </td>
+                <td className="px-4 py-3">
+                  {item.serial_number ? (
+                    <span className="num font-mono text-xs" dir="ltr">
+                      {item.serial_number}
+                    </span>
+                  ) : (
+                    <span className="text-ink-400">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 num">
                   {formatQuantity(item.quantity, item.unit_display)}

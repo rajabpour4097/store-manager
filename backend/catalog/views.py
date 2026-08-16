@@ -12,11 +12,12 @@ from accounts.models import ActivityLog, log_activity
 from accounts.permissions import CapabilityPermission
 from core.jalali import parse_flexible_date
 
-from .models import Product, ProductCategory, ProductDefect, StockMovement
+from .models import Product, ProductCategory, ProductDefect, ProductSerial, StockMovement
 from .serializers import (
     ProductCategorySerializer,
     ProductDefectSerializer,
     ProductSerializer,
+    ProductSerialSerializer,
     StockAdjustmentSerializer,
     StockMovementSerializer,
     catalog_options,
@@ -232,3 +233,16 @@ class ProductDefectViewSet(viewsets.ModelViewSet):
         log_activity(request.user, ActivityLog.Action.UPDATE, 'ProductDefect', defect.id,
                      f'درست شدن کالای {defect.product.name}', request)
         return Response(ProductDefectSerializer(defect).data)
+
+
+class ProductSerialViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProductSerialSerializer
+    permission_classes = [CapabilityPermission]
+    capability_prefix = 'catalog'
+    filterset_fields = ['product', 'status']
+    search_fields = ['serial_number', 'product__name', 'product__sku']
+    ordering_fields = ['serial_number', 'created_at']
+    ordering = ['serial_number']
+
+    def get_queryset(self):
+        return ProductSerial.objects.select_related('product')

@@ -13,6 +13,8 @@ class OrderItemInline(admin.TabularInline):
     model = OrderItem
     extra = 0
     autocomplete_fields = ['product']
+    fields = ['product', 'serial_number', 'quantity', 'unit_price', 'unit_cost',
+              'discount_amount', 'description']
 
 
 @admin.register(Order)

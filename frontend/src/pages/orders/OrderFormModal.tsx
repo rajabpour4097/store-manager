@@ -4,9 +4,9 @@ import { Plus, Trash2 } from 'lucide-react'
 import { AsyncSelect } from '@/components/ui/AsyncSelect'
 import { Button } from '@/components/ui/Button'
 import { DatePicker } from '@/components/ui/DatePicker'
-import { NumberInput, SelectInput, TextArea } from '@/components/ui/Field'
+import { NumberInput, SelectInput, TextArea, TextInput } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
-import { searchPartiesForOrder, searchProducts } from '@/components/ui/selectors'
+import { searchPartiesForOrder, searchProducts, searchSerials } from '@/components/ui/selectors'
 import { ProductFormModal } from '@/pages/catalog/ProductFormModal'
 import { PartyFormModal } from '@/pages/parties/PartyFormModal'
 import { useAsync } from '@/hooks/useAsync'
@@ -22,6 +22,8 @@ interface LineItem {
   key: string
   product: number | null
   productLabel: string
+  serial: string
+  serialId: number | null
   quantity: string
   unit_price: string
   discount_amount: string
@@ -39,6 +41,8 @@ function emptyLine(): LineItem {
     key: `${Date.now()}-${Math.random()}`,
     product: null,
     productLabel: '',
+    serial: '',
+    serialId: null,
     quantity: '1',
     unit_price: '',
     discount_amount: '0',
@@ -103,6 +107,7 @@ export function OrderFormModal({
     setOrderType(value)
     setParty(null)
     setPartyLabel('')
+    setItems([emptyLine()])
   }
 
   const subtotal = items.reduce((sum, item) => {
@@ -120,7 +125,11 @@ export function OrderFormModal({
   }
 
   const handleProductPick = async (key: string, productId: number | null, label: string) => {
-    updateItem(key, { product: productId, productLabel: label })
+    updateItem(key, {
+      product: productId,
+      productLabel: label,
+      ...(orderType === 'sale' ? { serial: '', serialId: null } : {}),
+    })
     if (!productId) return
     try {
       const product = await catalogApi.product(productId)
@@ -130,6 +139,42 @@ export function OrderFormModal({
         unit_price: String(
           toNumber(orderType === 'sale' ? product.sale_price : product.purchase_price),
         ),
+      })
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const handleSerialPick = async (
+    key: string,
+    serialId: number | null,
+    option: { label: string; meta?: Record<string, unknown> } | null,
+  ) => {
+    if (serialId === null || !option) {
+      updateItem(key, { serial: '', serialId: null })
+      return
+    }
+    const productId = Number(option.meta?.productId ?? 0) || null
+    const productName = String(option.meta?.productName ?? '')
+    const serial = String(option.meta?.serialNumber ?? option.label)
+    const salePrice = option.meta?.salePrice
+    updateItem(key, {
+      serialId,
+      serial,
+      product: productId,
+      productLabel: productName,
+      quantity: '1',
+      ...(salePrice != null && salePrice !== ''
+        ? { unit_price: String(toNumber(String(salePrice))) }
+        : {}),
+    })
+    if (!productId) return
+    try {
+      const product = await catalogApi.product(productId)
+      updateItem(key, {
+        product: productId,
+        productLabel: product.name,
+        unit_price: String(toNumber(product.sale_price)),
       })
     } catch {
       /* ignore */
@@ -152,8 +197,14 @@ export function OrderFormModal({
     const localErrors: Record<string, string[]> = {}
     if (!party) localErrors.party = ['طرف حساب الزامی است.']
     if (!orderDate) localErrors.order_date = ['تاریخ سفارش الزامی است.']
-    const validItems = items.filter((item) => item.product && toNumber(item.quantity) > 0)
+    const validItems = items.filter((item) => item.product)
     if (validItems.length === 0) localErrors.items = ['حداقل یک قلم کالا اضافه کنید.']
+    const serials = validItems
+      .map((item) => item.serial.trim().toLowerCase())
+      .filter(Boolean)
+    if (new Set(serials).size !== serials.length) {
+      localErrors.items = ['سریال تکراری در اقلام سفارش وجود دارد.']
+    }
     if (Object.keys(localErrors).length > 0) {
       setErrors(localErrors)
       return
@@ -172,9 +223,10 @@ export function OrderFormModal({
         description: description.trim(),
         items: validItems.map((item) => ({
           product: item.product,
-          quantity: item.quantity,
+          quantity: '1',
           unit_price: item.unit_price || '0',
           discount_amount: item.discount_amount || '0',
+          serial_number: item.serial.trim(),
         })),
       })
       toast.success('سفارش ثبت شد.')
@@ -249,7 +301,14 @@ export function OrderFormModal({
 
         <div className="rounded-2xl border border-ink-200 dark:border-ink-700">
           <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3 dark:border-ink-800">
-            <p className="text-sm font-semibold">اقلام سفارش</p>
+            <div>
+              <p className="text-sm font-semibold">اقلام سفارش</p>
+              <p className="mt-0.5 text-xs text-ink-400">
+                {orderType === 'purchase'
+                  ? 'سریال اختیاری است؛ اگر وارد شود باید یکتا باشد. موجودی بر اساس نام و مدل کالا شمرده می‌شود.'
+                  : 'سریال اختیاری است. با جست‌وجوی سریال می‌توانید دستگاه موجود را سریع‌تر پیدا کنید.'}
+              </p>
+            </div>
             <Button
               type="button"
               size="sm"
@@ -264,7 +323,7 @@ export function OrderFormModal({
             {items.map((item, index) => (
               <div
                 key={item.key}
-                className="grid gap-3 rounded-xl bg-ink-50/70 p-3 dark:bg-ink-800/40 lg:grid-cols-[1.6fr_0.7fr_0.9fr_0.8fr_auto]"
+                className="grid gap-3 rounded-xl bg-ink-50/70 p-3 dark:bg-ink-800/40 lg:grid-cols-[1.5fr_1.15fr_0.9fr_0.75fr_auto]"
               >
                 <AsyncSelect
                   label={index === 0 ? 'کالا' : undefined}
@@ -279,11 +338,26 @@ export function OrderFormModal({
                   }
                   createLabel="ثبت کالای جدید"
                 />
-                <NumberInput
-                  label={index === 0 ? 'تعداد' : undefined}
-                  value={item.quantity}
-                  onChange={(value) => updateItem(item.key, { quantity: value })}
-                />
+                {orderType === 'sale' ? (
+                  <AsyncSelect
+                    label={index === 0 ? 'سریال' : undefined}
+                    value={item.serialId}
+                    selectedLabel={item.serial}
+                    onChange={(value, option) => void handleSerialPick(item.key, value, option)}
+                    search={searchSerials}
+                    placeholder="جست‌وجوی سریال (اختیاری)"
+                    emptyText="سریال موجودی یافت نشد."
+                  />
+                ) : (
+                  <TextInput
+                    label={index === 0 ? 'سریال' : undefined}
+                    value={item.serial}
+                    onChange={(value) => updateItem(item.key, { serial: value, serialId: null })}
+                    placeholder="اختیاری"
+                    dir="ltr"
+                    className="font-mono text-sm"
+                  />
+                )}
                 <NumberInput
                   label={index === 0 ? 'فی (ریال)' : undefined}
                   value={item.unit_price}

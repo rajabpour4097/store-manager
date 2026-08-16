@@ -184,6 +184,7 @@ class OrderItem(BaseModel):
                                     verbose_name='بهای واحد')
     discount_amount = models.DecimalField(max_digits=18, decimal_places=0, default=0,
                                           verbose_name='تخفیف ردیف')
+    serial_number = models.CharField(max_length=80, blank=True, verbose_name='شماره سریال')
     description = models.CharField(max_length=255, blank=True, verbose_name='توضیح')
 
     class Meta:
@@ -192,6 +193,8 @@ class OrderItem(BaseModel):
         ordering = ['id']
 
     def __str__(self):
+        if self.serial_number:
+            return f'{self.product.name} · {self.serial_number}'
         return f'{self.product.name} × {self.quantity}'
 
     @property
@@ -204,6 +207,9 @@ class OrderItem(BaseModel):
         return (Decimal(self.quantity) * Decimal(self.unit_cost)).quantize(Decimal('1'))
 
     def save(self, *args, **kwargs):
+        self.serial_number = (self.serial_number or '').strip()
+        if self.serial_number:
+            self.quantity = Decimal('1')
         if not self.unit_cost and self.product_id:
             self.unit_cost = self.product.purchase_price
         super().save(*args, **kwargs)

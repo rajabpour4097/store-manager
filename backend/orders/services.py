@@ -9,11 +9,18 @@ from django.db import transaction
 from django.utils import timezone
 
 from catalog.models import StockMovement
-from catalog.services import apply_movement, revert_movements
+from catalog.services import (
+    apply_movement,
+    apply_order_serials,
+    find_serial,
+    normalize_serial,
+    revert_movements,
+    revert_order_serials,
+)
 from ledger.models import EntryCategory, SourceType
 from ledger.services import delete_system_entries, sync_system_entry
 
-from .models import Order, OrderStatus, OrderType, PaymentStatus, SalesHistory
+from .models import Order, OrderItem, OrderStatus, OrderType, PaymentStatus, SalesHistory
 
 SOURCE_ORDER = 'order'
 INVOICE_MARKER = 'ORD-INVOICE'
@@ -22,6 +29,63 @@ PAYMENT_MARKER = 'ORD-PAYMENT'
 
 class OrderError(Exception):
     """خطای عملیات سفارش."""
+
+
+def _item_serial_fields(item):
+    if isinstance(item, dict):
+        serial = normalize_serial(item.get('serial_number'))
+        product = item.get('product')
+        return serial, product
+    return normalize_serial(item.serial_number), item.product
+
+
+def validate_item_serials(order_type: str, items, *, exclude_order_id: int | None = None) -> None:
+    """اعتبارسنجی سریال‌های اقلام خرید/فروش.
+
+    آمار موجودی همچنان روی کالا (نام و مدل) است؛ سریال فقط هویت دستگاه را مشخص می‌کند.
+    """
+    seen: list[str] = []
+    is_sale = order_type == OrderType.SALE
+    for item in items:
+        serial, product = _item_serial_fields(item)
+        if not serial:
+            continue
+        key = serial.casefold()
+        if key in seen:
+            raise OrderError(f'سریال «{serial}» در اقلام سفارش تکراری است.')
+        seen.append(key)
+
+        product_id = getattr(product, 'pk', product)
+        existing = find_serial(serial)
+        other_items = OrderItem.objects.filter(
+            serial_number__iexact=serial,
+            order__order_type=order_type,
+        ).exclude(order__status=OrderStatus.CANCELLED)
+        if exclude_order_id:
+            other_items = other_items.exclude(order_id=exclude_order_id)
+
+        if is_sale:
+            owned = bool(exclude_order_id and existing and existing.sale_order_id == exclude_order_id)
+            if existing is None or (existing.status != existing.Status.IN_STOCK and not owned):
+                raise OrderError(f'سریال «{serial}» در موجودی انبار یافت نشد.')
+            if product_id and existing.product_id != product_id:
+                raise OrderError(
+                    f'سریال «{serial}» مربوط به کالای {existing.product.name} است.'
+                )
+            if other_items.exists():
+                raise OrderError(f'سریال «{serial}» در سفارش فروش دیگری ثبت شده است.')
+        else:
+            owned = bool(exclude_order_id and existing and existing.purchase_order_id == exclude_order_id)
+            if (existing is not None and not owned) or other_items.exists():
+                raise OrderError(f'سریال «{serial}» قبلاً ثبت شده است و نمی‌تواند تکراری باشد.')
+
+
+def sync_order_serials(order: Order) -> None:
+    """سریال‌های سفارش را با وضعیت فعلی همگام می‌کند."""
+    revert_order_serials(order_type=order.order_type, order_id=order.id)
+    if not order.affects_stock or order.status in (OrderStatus.DRAFT, OrderStatus.CANCELLED):
+        return
+    apply_order_serials(order)
 
 
 def sync_order_ledger(order: Order, user=None) -> None:
@@ -121,6 +185,7 @@ def refresh_order(order: Order, user=None) -> Order:
     order.recalculate()
     sync_order_ledger(order, user=user)
     sync_order_stock(order, user=user)
+    sync_order_serials(order)
     sync_order_sales_history(order)
     return order
 
@@ -134,6 +199,9 @@ def confirm_order(order: Order, user=None) -> Order:
         raise OrderError('فقط سفارش پیش‌نویس قابل تأیید است.')
     if not order.items.exists():
         raise OrderError('سفارش بدون ردیف کالا قابل تأیید نیست.')
+
+    items = list(order.items.select_related('product'))
+    validate_item_serials(order.order_type, items, exclude_order_id=order.id)
 
     if order.order_type == OrderType.SALE and order.affects_stock:
         shortages = [
@@ -171,6 +239,7 @@ def cancel_order(order: Order, user=None, reason: str = '') -> Order:
         raise OrderError('برای این سفارش چک ثبت شده است؛ ابتدا چک‌ها را اصلاح کنید.')
 
     revert_movements(source_type=SOURCE_ORDER, source_id=order.id, user=user)
+    revert_order_serials(order_type=order.order_type, order_id=order.id)
     delete_system_entries(source_type=SourceType.ORDER, source_id=order.id)
     SalesHistory.objects.filter(source_order=order).delete()
 

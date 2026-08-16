@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from core.jalali import to_jalali
 
-from .models import Product, ProductCategory, ProductDefect, StockMovement, Unit
+from .models import Product, ProductCategory, ProductDefect, ProductSerial, StockMovement, Unit
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
@@ -154,9 +154,24 @@ class ProductDefectSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class ProductSerialSerializer(serializers.ModelSerializer):
+    product_detail = ProductMiniSerializer(source='product', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = ProductSerial
+        fields = [
+            'id', 'product', 'product_detail', 'product_name', 'serial_number',
+            'status', 'status_display', 'purchase_order_id', 'sale_order_id', 'created_at',
+        ]
+        read_only_fields = fields
+
+
 def catalog_options() -> dict:
     return {
         'units': [{'value': v, 'label': l} for v, l in Unit.choices],
         'movement_reasons': [{'value': v, 'label': l} for v, l in StockMovement.Reason.choices],
         'defect_statuses': [{'value': v, 'label': l} for v, l in ProductDefect.Status.choices],
+        'serial_statuses': [{'value': v, 'label': l} for v, l in ProductSerial.Status.choices],
     }

@@ -7,7 +7,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import QuerySet
 
-from .models import Product, ProductDefect, StockMovement
+from .models import Product, ProductDefect, ProductSerial, StockMovement
 
 
 def open_defect_product_ids() -> QuerySet:
@@ -69,3 +69,52 @@ def revert_movements(*, source_type: str, source_id: int, user=None) -> int:
         count += 1
     movements.delete()
     return count
+
+
+def normalize_serial(value: str | None) -> str:
+    return (value or '').strip()
+
+
+def find_serial(serial_number: str) -> ProductSerial | None:
+    serial = normalize_serial(serial_number)
+    if not serial:
+        return None
+    return ProductSerial.objects.filter(serial_number__iexact=serial).first()
+
+
+def revert_order_serials(*, order_type: str, order_id: int) -> None:
+    """اثر سریال‌های یک سفارش را برمی‌گرداند."""
+    if order_type == 'purchase':
+        ProductSerial.objects.filter(purchase_order_id=order_id).delete()
+        return
+    ProductSerial.objects.filter(sale_order_id=order_id).update(
+        status=ProductSerial.Status.IN_STOCK,
+        sale_order_id=None,
+    )
+
+
+def apply_order_serials(order) -> None:
+    """ثبت یا خروج سریال‌های اقلام سفارش تأییدشده."""
+    is_sale = order.order_type == 'sale'
+    for item in order.items.select_related('product'):
+        serial = normalize_serial(item.serial_number)
+        if not serial:
+            continue
+        if is_sale:
+            locked = (
+                ProductSerial.objects.select_for_update()
+                .filter(serial_number__iexact=serial)
+                .first()
+            )
+            if locked is None:
+                continue
+            locked.status = ProductSerial.Status.SOLD
+            locked.sale_order_id = order.id
+            locked.save(update_fields=['status', 'sale_order_id', 'modified_at'])
+        else:
+            ProductSerial.objects.create(
+                product=item.product,
+                serial_number=serial,
+                status=ProductSerial.Status.IN_STOCK,
+                purchase_order_id=order.id,
+            )

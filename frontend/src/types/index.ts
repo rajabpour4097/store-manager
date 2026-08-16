@@ -429,6 +429,21 @@ export interface ProductMini {
   stock_quantity: string
 }
 
+export type ProductSerialStatus = 'in_stock' | 'sold'
+
+export interface ProductSerial {
+  id: number
+  product: number
+  product_detail?: ProductMini
+  product_name: string
+  serial_number: string
+  status: ProductSerialStatus
+  status_display: string
+  purchase_order_id: number | null
+  sale_order_id: number | null
+  created_at: string
+}
+
 export interface CatalogSummary {
   total_products: number
   active_products: number
@@ -475,6 +490,7 @@ export interface OrderItem {
   unit_price: string
   unit_cost?: string
   discount_amount?: string
+  serial_number?: string
   description?: string
   total_price?: string
   total_cost?: string

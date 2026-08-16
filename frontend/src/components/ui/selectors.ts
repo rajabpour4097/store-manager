@@ -58,3 +58,30 @@ export const searchProducts = async (
 /** کالاهای فعال بدون خرابی باز — برای ثبت خرابی جدید */
 export const searchAvailableProducts = (term: string) =>
   searchProducts(term, { excludeDefective: true })
+
+/** جست‌وجوی سریال دستگاه‌های موجود در انبار؛ انتخاب سریال کالا را هم مشخص می‌کند */
+export const searchSerials = async (
+  term: string,
+  options?: { productId?: number | null },
+): Promise<AsyncOption[]> => {
+  const response = await catalogApi.serials({
+    search: term,
+    page_size: 20,
+    status: 'in_stock',
+    product: options?.productId ?? undefined,
+  })
+  return response.results.map((serial) => ({
+    value: serial.id,
+    label: serial.serial_number,
+    description: `${serial.product_name}${
+      serial.product_detail?.sku ? ` · ${serial.product_detail.sku}` : ''
+    }`,
+    meta: {
+      serialNumber: serial.serial_number,
+      productId: serial.product,
+      productName: serial.product_name,
+      salePrice: serial.product_detail?.sale_price,
+      purchasePrice: serial.product_detail?.purchase_price,
+    },
+  }))
+}

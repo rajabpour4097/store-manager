@@ -191,3 +191,22 @@ class ProductDefectApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data['status'], ProductDefect.Status.REPAIRED)
         self.assertTrue(inventory_products().filter(id=self.product.id).exists())
+
+
+class ProductSerialApiTests(TestCase):
+    def setUp(self):
+        self.manager = User.objects.create_user(username='m', password='x', role=Role.MANAGER)
+        self.product = Product.objects.create(name='جاروبرقی فالکو', purchase_price=1, sale_price=2)
+        from .models import ProductSerial
+        ProductSerial.objects.create(product=self.product, serial_number='FALCO-10')
+        ProductSerial.objects.create(product=self.product, serial_number='FALCO-11',
+                                     status=ProductSerial.Status.SOLD)
+        self.client = APIClient()
+        self.client.force_authenticate(self.manager)
+
+    def test_search_by_serial_or_product_name(self):
+        by_serial = self.client.get('/api/catalog/serials/', {'search': 'FALCO-10'})
+        self.assertEqual(by_serial.data['count'], 1)
+        by_name = self.client.get('/api/catalog/serials/', {'search': 'فالکو', 'status': 'in_stock'})
+        self.assertEqual(by_name.data['count'], 1)
+        self.assertEqual(by_name.data['results'][0]['serial_number'], 'FALCO-10')
