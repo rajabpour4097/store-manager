@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from accounts.models import Role, User
 from parties.models import Party, PartyType
 
-from .models import Product, ProductCategory, ProductDefect, StockMovement
+from .models import Product, ProductCategory, ProductDefect, ProductSerial, StockMovement
 from .services import apply_movement, inventory_products, revert_movements
 
 
@@ -192,12 +192,76 @@ class ProductDefectApiTests(TestCase):
         self.assertEqual(response.data['status'], ProductDefect.Status.REPAIRED)
         self.assertTrue(inventory_products().filter(id=self.product.id).exists())
 
+    def test_serial_defect_keeps_product_in_inventory(self):
+        ProductSerial.objects.create(product=self.product, serial_number='DEF-10')
+        ProductSerial.objects.create(product=self.product, serial_number='DEF-11')
+        response = self.client.post('/api/catalog/defects/', {
+            'product': self.product.id,
+            'serial_number': 'DEF-10',
+            'reason': 'برد سوخته',
+            'registered_at': str(date.today()),
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['serial_number'], 'DEF-10')
+        self.assertTrue(inventory_products().filter(id=self.product.id).exists())
+        unit = ProductSerial.objects.get(serial_number='DEF-10')
+        self.assertEqual(unit.status, ProductSerial.Status.DEFECTIVE)
+        in_stock = self.client.get('/api/catalog/serials/', {'search': 'DEF', 'status': 'in_stock'})
+        self.assertEqual(in_stock.data['count'], 1)
+        self.assertEqual(in_stock.data['results'][0]['serial_number'], 'DEF-11')
+
+    def test_search_defects_by_serial(self):
+        ProductSerial.objects.create(product=self.product, serial_number='ZX-88')
+        created = self.client.post('/api/catalog/defects/', {
+            'serial_number': 'ZX-88',
+            'reason': 'آب‌خوردگی',
+            'registered_at': str(date.today()),
+        }, format='json')
+        self.assertEqual(created.status_code, 201, created.data)
+        found = self.client.get('/api/catalog/defects/', {'search': 'ZX-88'})
+        self.assertEqual(found.data['count'], 1)
+        self.assertEqual(found.data['results'][0]['serial_number'], 'ZX-88')
+
+    def test_duplicate_open_serial_defect_rejected(self):
+        ProductSerial.objects.create(product=self.product, serial_number='DUP-1')
+        ProductSerial.objects.create(product=self.product, serial_number='DUP-2')
+        first = self.client.post('/api/catalog/defects/', {
+            'serial_number': 'DUP-1',
+            'reason': 'خرابی',
+            'registered_at': str(date.today()),
+        }, format='json')
+        self.assertEqual(first.status_code, 201, first.data)
+        duplicate = self.client.post('/api/catalog/defects/', {
+            'serial_number': 'dup-1',
+            'reason': 'دوباره',
+            'registered_at': str(date.today()),
+        }, format='json')
+        self.assertEqual(duplicate.status_code, 400)
+        other = self.client.post('/api/catalog/defects/', {
+            'serial_number': 'DUP-2',
+            'reason': 'خرابی دیگر',
+            'registered_at': str(date.today()),
+        }, format='json')
+        self.assertEqual(other.status_code, 201, other.data)
+
+    def test_repair_returns_serial_to_stock(self):
+        ProductSerial.objects.create(product=self.product, serial_number='FIX-1')
+        created = self.client.post('/api/catalog/defects/', {
+            'serial_number': 'FIX-1',
+            'reason': 'خرابی',
+            'registered_at': str(date.today()),
+        }, format='json')
+        defect_id = created.data['id']
+        response = self.client.post(f'/api/catalog/defects/{defect_id}/repair/', {}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        unit = ProductSerial.objects.get(serial_number='FIX-1')
+        self.assertEqual(unit.status, ProductSerial.Status.IN_STOCK)
+
 
 class ProductSerialApiTests(TestCase):
     def setUp(self):
         self.manager = User.objects.create_user(username='m', password='x', role=Role.MANAGER)
         self.product = Product.objects.create(name='جاروبرقی فالکو', purchase_price=1, sale_price=2)
-        from .models import ProductSerial
         ProductSerial.objects.create(product=self.product, serial_number='FALCO-10')
         ProductSerial.objects.create(product=self.product, serial_number='FALCO-11',
                                      status=ProductSerial.Status.SOLD)

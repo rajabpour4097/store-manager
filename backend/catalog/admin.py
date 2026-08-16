@@ -29,9 +29,10 @@ class StockMovementAdmin(admin.ModelAdmin):
 
 @admin.register(ProductDefect)
 class ProductDefectAdmin(admin.ModelAdmin):
-    list_display = ['product', 'status', 'registered_at', 'last_follow_up_at', 'repaired_at']
+    list_display = ['product', 'serial_number', 'status', 'registered_at',
+                    'last_follow_up_at', 'repaired_at']
     list_filter = ['status']
-    search_fields = ['product__name', 'reason', 'description']
+    search_fields = ['product__name', 'reason', 'description', 'serial_number']
     date_hierarchy = 'registered_at'
 
 

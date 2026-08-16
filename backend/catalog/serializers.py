@@ -3,6 +3,7 @@ from rest_framework import serializers
 from core.jalali import to_jalali
 
 from .models import Product, ProductCategory, ProductDefect, ProductSerial, StockMovement, Unit
+from .services import find_serial, normalize_serial
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
@@ -50,7 +51,7 @@ class ProductSerializer(serializers.ModelSerializer):
         open_ids = self.context.get('open_defect_ids')
         if open_ids is not None:
             return obj.id in open_ids
-        return obj.defects.filter(status=ProductDefect.Status.OPEN).exists()
+        return obj.defects.filter(status=ProductDefect.Status.OPEN, serial_number='').exists()
 
     def validate(self, attrs):
         purchase = attrs.get('purchase_price', getattr(self.instance, 'purchase_price', 0))
@@ -123,12 +124,17 @@ class ProductDefectSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductDefect
         fields = [
-            'id', 'product', 'product_name', 'product_sku', 'supplier', 'supplier_name',
-            'reason', 'description', 'registered_at', 'registered_at_jalali',
-            'last_follow_up_at', 'last_follow_up_at_jalali', 'status', 'status_display',
-            'repaired_at', 'repaired_at_jalali', 'created_by', 'created_by_name', 'created_at',
+            'id', 'product', 'product_name', 'product_sku', 'serial_number',
+            'supplier', 'supplier_name', 'reason', 'description', 'registered_at',
+            'registered_at_jalali', 'last_follow_up_at', 'last_follow_up_at_jalali',
+            'status', 'status_display', 'repaired_at', 'repaired_at_jalali',
+            'created_by', 'created_by_name', 'created_at',
         ]
         read_only_fields = ['id', 'created_at', 'created_by', 'repaired_at']
+        extra_kwargs = {
+            'product': {'required': False},
+            'serial_number': {'required': False, 'allow_blank': True},
+        }
 
     def get_registered_at_jalali(self, obj):
         return to_jalali(obj.registered_at)
@@ -139,18 +145,52 @@ class ProductDefectSerializer(serializers.ModelSerializer):
     def get_repaired_at_jalali(self, obj):
         return to_jalali(obj.repaired_at)
 
+    def validate_serial_number(self, value):
+        return normalize_serial(value)
+
     def validate_product(self, product):
-        qs = ProductDefect.objects.filter(product=product, status=ProductDefect.Status.OPEN)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError('این کالا هم‌اکنون در لیست خرابی‌ها ثبت شده است.')
         return product
 
     def validate(self, attrs):
         status = attrs.get('status', getattr(self.instance, 'status', ProductDefect.Status.OPEN))
         if self.instance is None and status == ProductDefect.Status.REPAIRED:
             raise serializers.ValidationError({'status': 'ثبت اولیه باید با وضعیت خراب باشد.'})
+
+        serial = attrs.get('serial_number')
+        if serial is None:
+            serial = getattr(self.instance, 'serial_number', '')
+        serial = normalize_serial(serial)
+        product = attrs.get('product') or getattr(self.instance, 'product', None)
+        if not serial and not product:
+            raise serializers.ValidationError({'product': 'کالا یا سریال را انتخاب کنید.'})
+
+        if serial:
+            unit = find_serial(serial)
+            if unit is None:
+                raise serializers.ValidationError({'serial_number': 'این سریال در انبار یافت نشد.'})
+            if product and unit.product_id != product.pk:
+                raise serializers.ValidationError(
+                    {'serial_number': f'سریال مربوط به کالای {unit.product.name} است.'}
+                )
+            attrs['product'] = unit.product
+            attrs['serial_number'] = serial
+            qs = ProductDefect.objects.filter(
+                serial_number__iexact=serial, status=ProductDefect.Status.OPEN)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {'serial_number': 'این سریال هم‌اکنون در لیست خرابی‌ها ثبت شده است.'}
+                )
+        elif product:
+            qs = ProductDefect.objects.filter(
+                product=product, status=ProductDefect.Status.OPEN, serial_number='')
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {'product': 'این کالا هم‌اکنون در لیست خرابی‌ها ثبت شده است.'}
+                )
         return attrs
 
 

@@ -401,6 +401,7 @@ export interface ProductDefect {
   product: number
   product_name: string
   product_sku: string
+  serial_number: string
   supplier: number | null
   supplier_name: string
   reason: string

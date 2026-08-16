@@ -63,7 +63,11 @@ export function DefectStatusModal({ open, defect, onClose, onSaved }: DefectStat
           description: description.trim(),
           repaired_at: todayIso(),
         })
-        toast.success('کالا درست‌شده ثبت شد و به آمار موجودی بازگشت.')
+        toast.success(
+          defect.serial_number
+            ? 'دستگاه درست‌شده ثبت شد و سریال به موجودی قابل‌فروش بازگشت.'
+            : 'کالا درست‌شده ثبت شد و به آمار موجودی بازگشت.',
+        )
       } else {
         await catalogApi.updateDefect(defect.id, {
           status,
@@ -73,7 +77,9 @@ export function DefectStatusModal({ open, defect, onClose, onSaved }: DefectStat
         })
         toast.success(
           status === 'open' && defect.status === 'repaired'
-            ? 'کالا دوباره خراب ثبت شد و از آمار موجودی کنار گذاشته شد.'
+            ? defect.serial_number
+              ? 'دستگاه دوباره خراب ثبت شد و سریال از فروش کنار گذاشته شد.'
+              : 'کالا دوباره خراب ثبت شد و از آمار موجودی کنار گذاشته شد.'
             : 'وضعیت خرابی به‌روزرسانی شد.',
         )
       }
@@ -98,7 +104,9 @@ export function DefectStatusModal({ open, defect, onClose, onSaved }: DefectStat
       title="وضعیت کالای خراب"
       subtitle={
         defect
-          ? `${defect.product_name}${defect.product_sku ? ` · ${defect.product_sku}` : ''}`
+          ? `${defect.product_name}${defect.product_sku ? ` · ${defect.product_sku}` : ''}${
+              defect.serial_number ? ` · ${defect.serial_number}` : ''
+            }`
           : undefined
       }
       footer={
@@ -117,6 +125,12 @@ export function DefectStatusModal({ open, defect, onClose, onSaved }: DefectStat
       {defect && (
         <form id="defect-status-form" className="space-y-4" onSubmit={handleSubmit}>
           <div className="grid gap-3 rounded-xl border border-ink-100 bg-ink-50/70 p-4 text-sm dark:border-ink-800 dark:bg-ink-950/40 sm:grid-cols-2">
+            <div>
+              <p className="text-xs text-ink-400">شماره سریال</p>
+              <p className="num mt-1 font-medium font-mono" dir="ltr">
+                {defect.serial_number || '—'}
+              </p>
+            </div>
             <div>
               <p className="text-xs text-ink-400">شرکت خریداری‌شده</p>
               <p className="mt-1 font-medium">{defect.supplier_name || '—'}</p>
@@ -151,9 +165,13 @@ export function DefectStatusModal({ open, defect, onClose, onSaved }: DefectStat
             disabled={!canEdit}
             error={errors.status}
             hint={
-              status === 'repaired'
-                ? 'با ثبت درست شدن، کالا دوباره در آمار موجودی لحاظ می‌شود.'
-                : 'تا زمان درست شدن، این کالا در آمار موجودی لحاظ نمی‌شود.'
+              defect.serial_number
+                ? status === 'repaired'
+                  ? 'با ثبت درست شدن، این سریال دوباره قابل فروش می‌شود.'
+                  : 'تا زمان درست شدن، این سریال از فروش کنار گذاشته می‌شود.'
+                : status === 'repaired'
+                  ? 'با ثبت درست شدن، کالا دوباره در آمار موجودی لحاظ می‌شود.'
+                  : 'تا زمان درست شدن، این کالا در آمار موجودی لحاظ نمی‌شود.'
             }
           />
           <TextArea

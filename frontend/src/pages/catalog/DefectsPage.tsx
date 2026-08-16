@@ -54,6 +54,18 @@ export function DefectsPage() {
       ),
     },
     {
+      key: 'serial',
+      header: 'سریال',
+      render: (row) =>
+        row.serial_number ? (
+          <span className="num font-mono text-sm" dir="ltr">
+            {row.serial_number}
+          </span>
+        ) : (
+          '—'
+        ),
+    },
+    {
       key: 'reason',
       header: 'علت خرابی',
       render: (row) => <span className="line-clamp-2 max-w-56 text-sm">{row.reason}</span>,
@@ -119,7 +131,7 @@ export function DefectsPage() {
             />
             <input
               className="input pr-9"
-              placeholder="جست‌وجو بر اساس کالا، علت یا شرکت…"
+              placeholder="جست‌وجو بر اساس سریال، کالا، علت یا شرکت…"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />

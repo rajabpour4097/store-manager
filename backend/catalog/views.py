@@ -28,6 +28,7 @@ from .services import (
     inventory_products,
     normalize_serial,
     open_defect_product_ids,
+    sync_defect_serial,
 )
 
 
@@ -62,7 +63,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         open_defect = ProductDefect.objects.filter(
-            product_id=OuterRef('pk'), status=ProductDefect.Status.OPEN)
+            product_id=OuterRef('pk'), status=ProductDefect.Status.OPEN, serial_number='')
         queryset = Product.objects.select_related('category', 'default_supplier').annotate(
             _has_open_defect=Exists(open_defect))
         state = self.request.query_params.get('stock_state')
@@ -184,15 +185,24 @@ class ProductDefectViewSet(viewsets.ModelViewSet):
     permission_classes = [CapabilityPermission]
     capability_prefix = 'catalog'
     filterset_fields = ['status', 'product']
-    search_fields = ['product__name', 'product__sku', 'reason', 'description',
-                     'product__default_supplier__name']
     ordering_fields = ['registered_at', 'last_follow_up_at', 'created_at', 'status']
     ordering = ['-registered_at', '-id']
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
 
     def get_queryset(self):
-        return ProductDefect.objects.select_related(
+        queryset = ProductDefect.objects.select_related(
             'product', 'product__default_supplier', 'created_by')
+        term = normalize_serial(self.request.query_params.get('search') or '')
+        if term:
+            queryset = queryset.filter(
+                Q(serial_number__icontains=term)
+                | Q(product__name__icontains=term)
+                | Q(product__sku__icontains=term)
+                | Q(reason__icontains=term)
+                | Q(description__icontains=term)
+                | Q(product__default_supplier__name__icontains=term)
+            )
+        return queryset
 
     def perform_create(self, serializer):
         defect = serializer.save(
@@ -200,6 +210,7 @@ class ProductDefectViewSet(viewsets.ModelViewSet):
             status=ProductDefect.Status.OPEN,
             repaired_at=None,
         )
+        sync_defect_serial(defect)
         log_activity(self.request.user, ActivityLog.Action.CREATE, 'ProductDefect', defect.id,
                      f'ثبت خرابی کالای {defect.product.name}', self.request)
 
@@ -214,6 +225,7 @@ class ProductDefectViewSet(viewsets.ModelViewSet):
         elif defect.status == ProductDefect.Status.OPEN and defect.repaired_at:
             defect.repaired_at = None
             defect.save(update_fields=['repaired_at', 'modified_at'])
+        sync_defect_serial(defect)
         log_activity(self.request.user, ActivityLog.Action.UPDATE, 'ProductDefect', defect.id,
                      f'به‌روزرسانی خرابی کالای {defect.product.name}', self.request)
 
@@ -236,6 +248,7 @@ class ProductDefectViewSet(viewsets.ModelViewSet):
                 raise ValidationError({'reason': 'علت خرابی را وارد کنید.'})
             defect.reason = reason
         defect.save()
+        sync_defect_serial(defect)
         log_activity(request.user, ActivityLog.Action.UPDATE, 'ProductDefect', defect.id,
                      f'درست شدن کالای {defect.product.name}', request)
         return Response(ProductDefectSerializer(defect).data)

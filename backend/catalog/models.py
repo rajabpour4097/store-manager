@@ -168,6 +168,7 @@ class ProductDefect(BaseModel):
 
     product = models.ForeignKey(Product, on_delete=models.CASCADE,
                                 related_name='defects', verbose_name='کالا')
+    serial_number = models.CharField(max_length=80, blank=True, verbose_name='شماره سریال')
     reason = models.TextField(verbose_name='علت خرابی')
     description = models.TextField(blank=True, verbose_name='توضیحات')
     registered_at = models.DateField(verbose_name='تاریخ ثبت')
@@ -187,10 +188,17 @@ class ProductDefect(BaseModel):
         indexes = [
             models.Index(fields=['status', 'registered_at']),
             models.Index(fields=['product', 'status']),
+            models.Index(fields=['serial_number']),
         ]
 
     def __str__(self):
+        if self.serial_number:
+            return f'{self.product.name} · {self.serial_number} | {self.get_status_display()}'
         return f'{self.product.name} | {self.get_status_display()}'
+
+    def save(self, *args, **kwargs):
+        self.serial_number = (self.serial_number or '').strip()
+        super().save(*args, **kwargs)
 
 
 class ProductSerial(BaseModel):
@@ -199,6 +207,7 @@ class ProductSerial(BaseModel):
     class Status(models.TextChoices):
         IN_STOCK = 'in_stock', 'موجود'
         SOLD = 'sold', 'فروخته‌شده'
+        DEFECTIVE = 'defective', 'خراب'
 
     product = models.ForeignKey(Product, on_delete=models.PROTECT,
                                 related_name='serials', verbose_name='کالا')

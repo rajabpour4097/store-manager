@@ -13,9 +13,10 @@ from .models import Product, ProductDefect, ProductSerial, StockMovement
 
 
 def open_defect_product_ids() -> QuerySet:
-    """شناسه کالاهایی که فعلاً خراب ثبت شده‌اند و نباید در آمار موجودی باشند."""
+    """شناسه کالاهایی که خرابی بدون سریال دارند و نباید در آمار موجودی باشند."""
     return ProductDefect.objects.filter(
         status=ProductDefect.Status.OPEN,
+        serial_number='',
     ).values_list('product_id', flat=True)
 
 
@@ -82,6 +83,24 @@ def find_serial(serial_number: str) -> ProductSerial | None:
     if not serial:
         return None
     return ProductSerial.objects.filter(serial_number__iexact=serial).first()
+
+
+def sync_defect_serial(defect: ProductDefect) -> None:
+    """سریال دستگاه خراب را از موجودی قابل‌فروش خارج یا پس از تعمیر برمی‌گرداند."""
+    serial = normalize_serial(defect.serial_number)
+    if not serial:
+        return
+    unit = find_serial(serial)
+    if unit is None:
+        return
+    if defect.status == ProductDefect.Status.OPEN:
+        if unit.status != ProductSerial.Status.SOLD:
+            unit.status = ProductSerial.Status.DEFECTIVE
+            unit.save(update_fields=['status', 'modified_at'])
+        return
+    if unit.status == ProductSerial.Status.DEFECTIVE:
+        unit.status = ProductSerial.Status.IN_STOCK
+        unit.save(update_fields=['status', 'modified_at'])
 
 
 def revert_order_serials(*, order_type: str, order_id: int) -> None:
