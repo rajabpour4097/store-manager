@@ -32,6 +32,7 @@ interface LineItem {
 interface OrderFormModalProps {
   open: boolean
   defaultType?: OrderType
+  orderId?: number | null
   onClose: () => void
   onSaved: (orderId?: number) => void
 }
@@ -52,6 +53,7 @@ function emptyLine(): LineItem {
 export function OrderFormModal({
   open,
   defaultType = 'sale',
+  orderId = null,
   onClose,
   onSaved,
 }: OrderFormModalProps) {
@@ -80,23 +82,67 @@ export function OrderFormModal({
     [],
   )
 
+  const typeLabel = orderType === 'purchase' ? 'خرید' : 'فروش'
+  const isEditing = Boolean(orderId)
+
   useEffect(() => {
     if (!open) return
-    setOrderType(defaultType)
-    setParty(null)
-    setPartyLabel('')
-    setOrderDate(todayIso())
-    setDueDate('')
-    setDiscount('0')
-    setTaxPercent('0')
-    setShipping('0')
-    setDescription('')
-    setItems([emptyLine()])
     setErrors({})
     setPartyFormOpen(false)
     setProductFormOpen(false)
     setProductFormLineKey(null)
-  }, [open, defaultType])
+
+    if (!orderId) {
+      setOrderType(defaultType)
+      setParty(null)
+      setPartyLabel('')
+      setOrderDate(todayIso())
+      setDueDate('')
+      setDiscount('0')
+      setTaxPercent('0')
+      setShipping('0')
+      setDescription('')
+      setItems([emptyLine()])
+      return
+    }
+
+    let active = true
+    void ordersApi
+      .get(orderId)
+      .then((order) => {
+        if (!active) return
+        setOrderType(order.order_type)
+        setParty(order.party)
+        setPartyLabel(order.party_detail?.name ?? '')
+        setOrderDate(order.order_date)
+        setDueDate(order.due_date ?? '')
+        setDiscount(String(toNumber(order.discount_amount)))
+        setTaxPercent(String(toNumber(order.tax_percent)))
+        setShipping(String(toNumber(order.shipping_amount)))
+        setDescription(order.description ?? '')
+        setItems(
+          order.items.length > 0
+            ? order.items.map((item) => ({
+                key: String(item.id ?? `${Date.now()}-${Math.random()}`),
+                product: item.product,
+                productLabel: item.product_name ?? item.product_detail?.name ?? '',
+                serial: item.serial_number ?? '',
+                serialId: null,
+                quantity: '1',
+                unit_price: String(toNumber(item.unit_price)),
+                discount_amount: String(toNumber(item.discount_amount ?? 0)),
+              }))
+            : [emptyLine()],
+        )
+      })
+      .catch(() => {
+        if (active) toast.error('بارگذاری فاکتور انجام نشد.')
+      })
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultType, orderId])
 
   const partySearch = useCallback(
     (term: string) => searchPartiesForOrder(term, orderType),
@@ -212,7 +258,7 @@ export function OrderFormModal({
 
     setSaving(true)
     try {
-      const order = await ordersApi.create({
+      const payload = {
         order_type: orderType,
         party,
         order_date: orderDate,
@@ -228,15 +274,24 @@ export function OrderFormModal({
           discount_amount: item.discount_amount || '0',
           serial_number: toLatinDigits(item.serial).trim(),
         })),
-      })
-      toast.success('سفارش ثبت شد.')
+      }
+      const order = isEditing
+        ? await ordersApi.update(orderId as number, payload)
+        : await ordersApi.create(payload)
+      toast.success(isEditing ? `${typeLabel} ذخیره شد.` : `${typeLabel} ثبت شد.`)
       onClose()
       onSaved(order.id)
     } catch (error) {
       if (error instanceof ApiError && error.fieldErrors) {
         setErrors(error.fieldErrors)
       }
-      toast.error(error instanceof ApiError ? error.message : 'ثبت سفارش انجام نشد.')
+      toast.error(
+        error instanceof ApiError
+          ? error.message
+          : isEditing
+            ? `ذخیره ${typeLabel} انجام نشد.`
+            : `ثبت ${typeLabel} انجام نشد.`,
+      )
     } finally {
       setSaving(false)
     }
@@ -246,7 +301,7 @@ export function OrderFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="ثبت سفارش جدید"
+      title={isEditing ? `ویرایش ${typeLabel}` : `ثبت ${typeLabel} جدید`}
       subtitle="اقلام، طرف حساب و شرایط پرداخت را مشخص کنید"
       size="xl"
       footer={
@@ -255,7 +310,7 @@ export function OrderFormModal({
             انصراف
           </Button>
           <Button loading={saving} onClick={handleSubmit}>
-            ثبت سفارش
+            {isEditing ? `ذخیره ${typeLabel}` : `ثبت ${typeLabel}`}
           </Button>
         </>
       }
@@ -267,6 +322,7 @@ export function OrderFormModal({
             required
             value={orderType}
             onChange={(value) => handleOrderTypeChange(value as OrderType)}
+            disabled={isEditing}
             options={[
               { value: 'sale', label: 'فروش' },
               { value: 'purchase', label: 'خرید' },

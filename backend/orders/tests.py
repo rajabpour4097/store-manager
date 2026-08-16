@@ -315,7 +315,7 @@ class OrderSerialTests(TestCase):
                        'serial_number': 'SN-FIND-1'}],
         }, format='json')
         self.assertEqual(created.status_code, 201, created.data)
-        self.assertEqual(created.data['status'], OrderStatus.DRAFT)
+        self.assertEqual(created.data['status'], OrderStatus.CONFIRMED)
 
         response = client.get('/api/catalog/serials/', {
             'search': 'SN-FIND', 'status': 'in_stock',
@@ -346,8 +346,11 @@ class OrderSerialTests(TestCase):
             'items': [{'product': self.product.id, 'quantity': '4', 'unit_price': 1000}],
         }, format='json')
         self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['status'], OrderStatus.CONFIRMED)
         self.assertEqual(response.data['items'][0]['serial_number'], '')
         self.assertEqual(response.data['items'][0]['quantity'], '4.00')
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, Decimal('4.00'))
 
     def test_duplicate_serial_on_another_draft_purchase_is_rejected(self):
         self._purchase('DRAFT-DUP', confirm=False)
@@ -383,21 +386,22 @@ class OrderApiTests(TestCase):
             'items': [{'product': self.product.id, 'quantity': '3', 'unit_price': 2000}],
         }, format='json')
 
-    def test_accountant_creates_draft_but_cannot_confirm(self):
+    def test_accountant_creates_confirmed_order_but_cannot_use_confirm_endpoint(self):
         self.client.force_authenticate(self.accountant)
         response = self.create_order()
         self.assertEqual(response.status_code, 201, response.data)
         order_id = response.data['id']
-        self.assertEqual(response.data['status'], OrderStatus.DRAFT)
+        self.assertEqual(response.data['status'], OrderStatus.CONFIRMED)
         confirm = self.client.post(f'/api/orders/{order_id}/confirm/')
         self.assertEqual(confirm.status_code, 403)
 
-    def test_manager_confirms_order(self):
+    def test_create_confirms_and_updates_stock(self):
         self.client.force_authenticate(self.manager)
-        order_id = self.create_order().data['id']
-        response = self.client.post(f'/api/orders/{order_id}/confirm/')
-        self.assertEqual(response.status_code, 200, response.data)
+        response = self.create_order()
+        self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data['status'], OrderStatus.CONFIRMED)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, Decimal('47.00'))
 
     def test_due_date_before_order_date_rejected(self):
         self.client.force_authenticate(self.manager)
@@ -420,14 +424,25 @@ class OrderApiTests(TestCase):
     def test_confirmed_order_cannot_be_deleted(self):
         self.client.force_authenticate(self.manager)
         order_id = self.create_order().data['id']
-        self.client.post(f'/api/orders/{order_id}/confirm/')
         response = self.client.delete(f'/api/orders/{order_id}/')
         self.assertEqual(response.status_code, 400)
+
+    def test_confirmed_order_can_be_edited(self):
+        self.client.force_authenticate(self.manager)
+        order_id = self.create_order().data['id']
+        response = self.client.patch(f'/api/orders/{order_id}/', {
+            'description': 'ویرایش فاکتور',
+            'items': [{'product': self.product.id, 'quantity': '1', 'unit_price': 2000}],
+        }, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['description'], 'ویرایش فاکتور')
+        self.assertEqual(response.data['items'][0]['quantity'], '1.00')
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, Decimal('49.00'))
 
     def test_summary_endpoint(self):
         self.client.force_authenticate(self.manager)
         order_id = self.create_order().data['id']
-        self.client.post(f'/api/orders/{order_id}/confirm/')
         response = self.client.get('/api/orders/summary/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['sale']['count'], 1)

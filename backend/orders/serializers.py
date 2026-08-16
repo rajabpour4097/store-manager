@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.db import transaction
 from rest_framework import serializers
 
 from catalog.models import Product
@@ -144,13 +145,19 @@ class OrderSerializer(serializers.ModelSerializer):
         for item in items_data:
             OrderItem.objects.create(order=order, **item)
 
+    @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         order = Order.objects.create(**validated_data)
         self._apply_items(order, items_data)
         order.recalculate()
-        from .services import sync_order_serials
-        sync_order_serials(order)
+        from .services import OrderError, confirm_order
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        try:
+            confirm_order(order, user=user)
+        except OrderError as exc:
+            raise serializers.ValidationError({'detail': str(exc)}) from exc
         return order
 
     def update(self, instance, validated_data):
@@ -165,8 +172,17 @@ class OrderSerializer(serializers.ModelSerializer):
         if items_data is not None:
             self._apply_items(instance, items_data)
 
-        from .services import refresh_order
-        refresh_order(instance, user=self.context['request'].user if 'request' in self.context else None)
+        from .services import OrderError, confirm_order, refresh_order
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        instance.refresh_from_db()
+        try:
+            if instance.status == OrderStatus.DRAFT:
+                confirm_order(instance, user=user)
+            else:
+                refresh_order(instance, user=user)
+        except OrderError as exc:
+            raise serializers.ValidationError({'detail': str(exc)}) from exc
         return instance
 
 
@@ -179,6 +195,7 @@ class OrderListSerializer(serializers.ModelSerializer):
     due_date_jalali = serializers.SerializerMethodField()
     remaining_amount = serializers.DecimalField(max_digits=18, decimal_places=0, read_only=True)
     items_count = serializers.IntegerField(read_only=True)
+    is_editable = serializers.BooleanField(read_only=True)
     entry_mode = serializers.CharField(read_only=True)
     entry_mode_display = serializers.CharField(source='get_entry_mode_display', read_only=True)
 
@@ -188,7 +205,7 @@ class OrderListSerializer(serializers.ModelSerializer):
             'id', 'number', 'order_type', 'order_type_display', 'party', 'party_name',
             'order_date', 'order_date_jalali', 'due_date', 'due_date_jalali', 'status',
             'status_display', 'payment_status', 'payment_status_display', 'total_amount',
-            'paid_amount', 'remaining_amount', 'items_count', 'created_at',
+            'paid_amount', 'remaining_amount', 'items_count', 'is_editable', 'created_at',
             'entry_mode', 'entry_mode_display',
         ]
 

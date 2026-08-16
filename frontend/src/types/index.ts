@@ -562,6 +562,7 @@ export interface OrderListItem {
   paid_amount: string
   remaining_amount: string
   items_count: number
+  is_editable: boolean
   created_at: string
   entry_mode: EntryMode
   entry_mode_display: string

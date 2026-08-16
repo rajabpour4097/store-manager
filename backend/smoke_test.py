@@ -178,7 +178,6 @@ if draft.status_code == 201:
     oid = draft.data['id']
     check('حسابدار: تأیید سفارش (باید ۴۰۳)', 'post', f'/api/orders/{oid}/confirm/', expect=403)
     login('manager1', 'Manager@1234')
-    check('مدیر: تأیید سفارش', 'post', f'/api/orders/{oid}/confirm/')
     check('مدیر: ثبت پرداخت', 'post', f'/api/orders/{oid}/register-payment/', data={'amount': 1000})
     check('مدیر: لغو سفارش', 'post', f'/api/orders/{oid}/cancel/', data={'reason': 'تست دود'})
     check('مدیر: حذف سفارش', 'delete', f'/api/orders/{oid}/', expect=204)

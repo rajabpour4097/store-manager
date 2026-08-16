@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import Count, F, Q, Sum
 from django.http import HttpResponse
 from rest_framework import status as http_status
@@ -324,28 +325,33 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
 
         uploaded.seek(0)
-        order = create_order_from_invoice(
-            order_type=order_type,
-            party=party,
-            order_date=parsed.order_date,
-            invoice_image=uploaded,
-            parsed_payload=payload,
-            ocr_confidence=parsed.confidence,
-            ocr_status=ocr_status,
-            items_data=items_data,
-            create_missing_products=data.get('create_missing_products', True),
-            user=request.user,
-        )
+        try:
+            with transaction.atomic():
+                order = create_order_from_invoice(
+                    order_type=order_type,
+                    party=party,
+                    order_date=parsed.order_date,
+                    invoice_image=uploaded,
+                    parsed_payload=payload,
+                    ocr_confidence=parsed.confidence,
+                    ocr_status=ocr_status,
+                    items_data=items_data,
+                    create_missing_products=data.get('create_missing_products', True),
+                    user=request.user,
+                )
+                confirm_order(order, user=request.user)
+        except OrderError as exc:
+            return Response({'detail': str(exc)}, status=http_status.HTTP_400_BAD_REQUEST)
 
         log_activity(request.user, ActivityLog.Action.CREATE, 'Order', order.id,
                      f'ثبت خودکار {order.get_order_type_display()} از فاکتور {order.number}', request)
 
-        # مرحله inventory: پس از confirm_order موجودی به‌روز می‌شود
         order_data = OrderSerializer(order, context={'request': request}).data
         order_data['pipeline'] = [
-            {'name': 'human_confirmation', 'label': 'تأیید کاربر', 'status': 'done', 'detail': 'پیش‌نویس ثبت شد'},
-            {'name': 'inventory', 'label': 'موجودی انبار', 'status': 'pending',
-             'detail': 'پس از تأیید سفارش، موجودی به‌روز می‌شود'},
+            {'name': 'human_confirmation', 'label': 'تأیید کاربر', 'status': 'done',
+             'detail': 'فاکتور ثبت شد'},
+            {'name': 'inventory', 'label': 'موجودی انبار', 'status': 'done',
+             'detail': 'موجودی انبار به‌روز شد'},
         ]
         return Response(order_data, status=http_status.HTTP_201_CREATED)
 

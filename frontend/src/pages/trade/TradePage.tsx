@@ -6,6 +6,7 @@ import {
   Camera,
   Eye,
   Hand,
+  Pencil,
   Plus,
   Search,
   ShoppingCart,
@@ -107,6 +108,7 @@ export function TradePage() {
   const [status, setStatus] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [defaultType, setDefaultType] = useState<OrderType>('sale')
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<OrderListItem | null>(null)
   const [deletingBusy, setDeletingBusy] = useState(false)
 
@@ -381,6 +383,20 @@ export function TradePage() {
           >
             <Eye size={16} />
           </Link>
+          {can('orders.change') && row.status !== 'cancelled' && row.status !== 'completed' && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingId(row.id)
+                setDefaultType(row.order_type)
+                setFormOpen(true)
+              }}
+              className="rounded-lg p-1.5 text-ink-500 transition hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10"
+              title="ویرایش"
+            >
+              <Pencil size={16} />
+            </button>
+          )}
           {can('orders.delete') && row.status === 'draft' && (
             <button
               type="button"
@@ -457,7 +473,7 @@ export function TradePage() {
                 <div>
                   <h3 className="font-semibold text-ink-800 dark:text-ink-100">ثبت دستی خرید/فروش</h3>
                   <p className="mt-1 text-sm text-ink-500">
-                    اطلاعات سفارش را به‌صورت دستی وارد کنید. پس از تأیید، موجودی انبار و دفتر معین به‌روز می‌شود.
+                    اطلاعات را دستی وارد کنید. با ثبت خرید یا فروش، موجودی انبار و دفتر معین به‌روز می‌شود.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -465,6 +481,7 @@ export function TradePage() {
                     variant="secondary"
                     icon={<ArrowDownToLine size={16} />}
                     onClick={() => {
+                      setEditingId(null)
                       setDefaultType('purchase')
                       setFormOpen(true)
                     }}
@@ -474,6 +491,7 @@ export function TradePage() {
                   <Button
                     icon={<ArrowUpFromLine size={16} />}
                     onClick={() => {
+                      setEditingId(null)
                       setDefaultType('sale')
                       setFormOpen(true)
                     }}
@@ -819,7 +837,11 @@ export function TradePage() {
       <OrderFormModal
         open={formOpen}
         defaultType={defaultType}
-        onClose={() => setFormOpen(false)}
+        orderId={editingId}
+        onClose={() => {
+          setFormOpen(false)
+          setEditingId(null)
+        }}
         onSaved={refresh}
       />
 

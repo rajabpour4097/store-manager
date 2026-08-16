@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Eye, Plus, Search, ShoppingCart, Trash2 } from 'lucide-react'
+import { Eye, Pencil, Plus, Search, ShoppingCart, Trash2 } from 'lucide-react'
 
 import { Badge, ORDER_STATUS_TONES, PAYMENT_STATUS_TONES } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -31,6 +31,7 @@ export function OrdersPage() {
   const [paymentStatus, setPaymentStatus] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [defaultType, setDefaultType] = useState<OrderType>('sale')
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<OrderListItem | null>(null)
   const [deletingBusy, setDeletingBusy] = useState(false)
 
@@ -134,6 +135,20 @@ export function OrdersPage() {
           >
             <Eye size={16} />
           </Link>
+          {can('orders.change') && row.status !== 'cancelled' && row.status !== 'completed' && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingId(row.id)
+                setDefaultType(row.order_type)
+                setFormOpen(true)
+              }}
+              className="rounded-lg p-1.5 text-ink-500 transition hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10"
+              title="ویرایش"
+            >
+              <Pencil size={16} />
+            </button>
+          )}
           {can('orders.delete') && row.status === 'draft' && (
             <button
               type="button"
@@ -162,6 +177,7 @@ export function OrdersPage() {
                 variant="secondary"
                 icon={<Plus size={16} />}
                 onClick={() => {
+                  setEditingId(null)
                   setDefaultType('purchase')
                   setFormOpen(true)
                 }}
@@ -171,6 +187,7 @@ export function OrdersPage() {
               <Button
                 icon={<Plus size={16} />}
                 onClick={() => {
+                  setEditingId(null)
                   setDefaultType('sale')
                   setFormOpen(true)
                 }}
@@ -272,7 +289,11 @@ export function OrdersPage() {
       <OrderFormModal
         open={formOpen}
         defaultType={defaultType}
-        onClose={() => setFormOpen(false)}
+        orderId={editingId}
+        onClose={() => {
+          setFormOpen(false)
+          setEditingId(null)
+        }}
         onSaved={refresh}
       />
 
